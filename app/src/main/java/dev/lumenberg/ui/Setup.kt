@@ -38,9 +38,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -49,6 +51,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -57,7 +60,11 @@ import androidx.compose.ui.unit.dp
 import dev.lumenberg.ai.Account
 import dev.lumenberg.ai.DeviceCode
 import dev.lumenberg.ai.Provider
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.lumenberg.ai.SignIn
+import dev.lumenberg.gestures.Gestures
 import kotlinx.coroutines.launch
 
 /** Full-screen sheet used for both first run and Settings. One layout, two entry points. */
@@ -348,6 +355,7 @@ fun Settings(
     onRequestHome: () -> Unit,
     onConnect: () -> Unit,
     onAddWidget: () -> Unit,
+    onOpenAccessibility: () -> Unit,
 ) {
     LaunchedEffect(Unit) { session.loadModels() }
 
@@ -465,6 +473,8 @@ fun Settings(
         }
     }
 
+    GestureSettings(onOpenAccessibility)
+
     Text(
         "App use is counted on this device only, to order search results. Nothing is uploaded. " +
             "Your assistant sees the text you type and the names of your installed apps.",
@@ -473,15 +483,96 @@ fun Settings(
     )
 }
 
+/**
+ * Swipe navigation. The permission is a real one, so this says what the service can and
+ * cannot do rather than hiding it behind a switch.
+ */
+@Composable
+private fun GestureSettings(onOpenAccessibility: () -> Unit) {
+    val context = LocalContext.current
+    val lifecycle = LocalLifecycleOwner.current
+    var running by remember { mutableStateOf(Gestures.serviceRunning(context)) }
+    var on by remember { mutableStateOf(Gestures.enabled(context)) }
+    var edges by remember { mutableStateOf(Gestures.edges(context)) }
+    var bottom by remember { mutableStateOf(Gestures.bottom(context)) }
+
+    // The user leaves to Accessibility settings and comes back; re-read on the way in.
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) running = Gestures.serviceRunning(context)
+        }
+        lifecycle.lifecycle.addObserver(observer)
+        onDispose { lifecycle.lifecycle.removeObserver(observer) }
+    }
+
+    Card {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Labelled(
+                    "Swipe navigation",
+                    "For phones that force buttons on third-party launchers.",
+                    Modifier.weight(1f),
+                )
+                Switch(
+                    checked = on && running,
+                    enabled = running,
+                    onCheckedChange = {
+                        on = it
+                        Gestures.set(context, enabled = it)
+                    },
+                )
+            }
+
+            if (!running) {
+                Text(
+                    "Swipe in from either side for Back, up from the bottom for Home, up and " +
+                        "hold for Recents. Android only allows this through an accessibility " +
+                        "service, so Lumenberg has one. It is declared unable to read your " +
+                        "screen and is used for nothing else.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Button(onClick = onOpenAccessibility) { Text("Turn on in Accessibility") }
+            } else if (on) {
+                Choice(
+                    label = "Where",
+                    options = listOf(true to "Sides", false to "Bottom"),
+                    selected = null,
+                    name = { it.second },
+                    onSelect = { },
+                    checked = { if (it.first) edges else bottom },
+                    onToggle = { option ->
+                        if (option.first) {
+                            edges = !edges
+                            Gestures.set(context, edges = edges)
+                        } else {
+                            bottom = !bottom
+                            Gestures.set(context, bottom = bottom)
+                        }
+                    },
+                )
+                Text(
+                    "Xiaomi hides the button bar only if you grant Lumenberg one permission " +
+                        "over ADB. Without it the buttons stay and these gestures sit alongside them.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
 /** One row of the appearance settings. */
 @Composable
 private fun <T> Choice(
     label: String,
     options: List<T>,
-    selected: T,
+    selected: T?,
     name: (T) -> String,
     swatch: ((T) -> Color?)? = null,
     onSelect: (T) -> Unit,
+    checked: ((T) -> Boolean)? = null,
+    onToggle: ((T) -> Unit)? = null,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
@@ -492,8 +583,8 @@ private fun <T> Choice(
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             options.forEach { option ->
                 FilterChip(
-                    selected = option == selected,
-                    onClick = { onSelect(option) },
+                    selected = checked?.invoke(option) ?: (option == selected),
+                    onClick = { onToggle?.invoke(option) ?: onSelect(option) },
                     label = { Text(name(option)) },
                     leadingIcon = swatch?.invoke(option)?.let { colour ->
                         {

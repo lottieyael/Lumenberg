@@ -32,6 +32,7 @@ import dev.lumenberg.ai.Account
 import dev.lumenberg.ai.OpenRouterAuth
 import dev.lumenberg.ai.Provider
 import dev.lumenberg.core.AppRepository
+import dev.lumenberg.gestures.Gestures
 import dev.lumenberg.ui.Connect
 import dev.lumenberg.ui.Home
 import dev.lumenberg.ui.Look
@@ -154,6 +155,7 @@ class MainActivity : ComponentActivity() {
                                 onRequestHome = ::requestHomeRole,
                                 onConnect = ::openConnect,
                                 onAddWidget = ::addWidget,
+                                onOpenAccessibility = ::openAccessibility,
                             )
                         }
                         Overlay.Widgets -> Sheet("Add a widget", onClose = { overlay = Overlay.None }) {
@@ -248,6 +250,11 @@ class MainActivity : ComponentActivity() {
                 overlay = Overlay.None
             }
         }
+    }
+
+    private fun openAccessibility() {
+        runCatching { startActivity(Gestures.settingsIntent()) }
+            .onFailure { session.report("This phone has no accessibility settings screen.") }
     }
 
     private fun openUrl(url: String) {

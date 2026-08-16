@@ -24,6 +24,23 @@ is a bare list and crashes on some builds.
 wallpaper-derived Material You; and four card backgrounds, from solid through to glass,
 which samples the wallpaper behind each card and blurs it.
 
+**Swipe navigation.** Optional, off by default. Swipe in from either side for Back, up from
+the bottom for Home, up and hold for Recents. This exists because MIUI and HyperOS switch
+third-party launchers back to on-screen buttons, and `performGlobalAction` is the only way
+to press Back or open Recents without root, so it is implemented as an accessibility
+service. The service is declared `canRetrieveWindowContent="false"`, so it cannot read the
+screen, and it handles no accessibility events. The swipe targets are
+`TYPE_ACCESSIBILITY_OVERLAY` windows, which a service may add without the draw-over-other-apps
+permission, so enabling the service is the whole of the setup.
+
+Note that hiding the on-screen button bar is a separate matter that Lumenberg cannot do for
+you. `policy_control immersive.navigation` stopped working in Android 11. It now needs
+`adb shell pm grant dev.lumenberg android.permission.WRITE_SECURE_SETTINGS`, and without it
+the buttons remain and these gestures sit alongside them.
+
+Using an accessibility service this way is against Google Play policy. That does not affect
+GitHub releases, but it would rule out Play distribution.
+
 ## Connecting an assistant
 
 An assistant is optional. The launcher is fully usable without one.
@@ -75,7 +92,7 @@ you press send. There is no analytics or telemetry.
 ## Install
 
 Download the APK from [Releases](../../releases), install it (`adb install
-Lumenberg-0.3.0.apk`), then press Home and select Lumenberg.
+Lumenberg-0.4.0.apk`), then press Home and select Lumenberg.
 
 ## Build
 

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  canRetrieveWindowContent is false on purpose: this service exists only to call
+  performGlobalAction, so it is declared unable to read what is on screen.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:canPerformGestures="false"
+    android:canRetrieveWindowContent="false"
+    android:description="@string/gestures_description"
+    android:notificationTimeout="100"
+    android:summary="@string/gestures_summary" />

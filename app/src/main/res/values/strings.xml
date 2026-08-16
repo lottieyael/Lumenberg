@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="gestures_description">Adds swipe navigation for devices that switch third-party launchers back to on-screen buttons. Swipe in from either side for Back, up from the bottom for Home, up and hold for Recents.\n\nThis service cannot read the contents of your screen. It is declared without that ability, and it is used only to press Back, Home and Recents.</string>
+    <string name="gestures_summary">Swipe navigation for Lumenberg</string>
+</resources>
