@@ -36,14 +36,21 @@ fun Card(
     content: @Composable () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
+    val alpha = LocalSurfaceAlpha.current
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(Motion.Radius),
         color = when (tone) {
-            Tone.Raised -> scheme.surfaceContainer.copy(alpha = 0.94f)
+            Tone.Raised -> scheme.surfaceContainerHigh.copy(alpha = alpha)
+            // Panels that sit over other content stay opaque whatever the setting:
+            // a translucent app list on top of a translucent card is unreadable.
             Tone.Solid -> scheme.surfaceContainerHigh
-            Tone.Accent -> scheme.primaryContainer
+            Tone.Accent -> scheme.primaryContainer.copy(alpha = alpha)
         },
+        // Surface infers its text colour from the exact scheme colour it was handed, and
+        // copy(alpha) is no longer that colour, so it silently falls back to black. On a
+        // dark card that is invisible text, which is what "dark mode looks weird" was.
+        contentColor = if (tone == Tone.Accent) scheme.onPrimaryContainer else scheme.onSurface,
         content = content,
     )
 }

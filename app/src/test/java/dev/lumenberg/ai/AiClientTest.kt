@@ -105,6 +105,42 @@ class AiClientTest {
         assertEquals("gpt-5", client.preferred(Provider.COPILOT, models))
     }
 
+    // --- stream token parsing ---------------------------------------------
+
+    private fun token(json: String) = client.tokenOf(org.json.JSONObject(json))
+
+    @Test
+    fun `a reasoning model's empty content chunks produce nothing, not the word null`() {
+        // DeepSeek's reasoner sends content: null while it is still thinking.
+        val chunk = """{"choices":[{"delta":{"content":null,"reasoning_content":"hmm"}}]}"""
+        assertNull(token(chunk))
+    }
+
+    @Test
+    fun `an ordinary OpenAI-shaped chunk yields its text`() {
+        assertEquals("Hey", token("""{"choices":[{"delta":{"content":"Hey"}}]}"""))
+    }
+
+    @Test
+    fun `an Anthropic chunk yields its text`() {
+        assertEquals("Hey", token("""{"delta":{"text":"Hey"}}"""))
+    }
+
+    @Test
+    fun `a missing content field yields nothing`() {
+        assertNull(token("""{"choices":[{"delta":{}}]}"""))
+    }
+
+    @Test
+    fun `a keep-alive shaped event yields nothing`() {
+        assertNull(token("""{"choices":[{"delta":{"role":"assistant"}}]}"""))
+    }
+
+    @Test
+    fun `a non-streaming message body still yields its text`() {
+        assertEquals("Hi", token("""{"choices":[{"message":{"content":"Hi"}}]}"""))
+    }
+
     // --- provider wiring --------------------------------------------------
 
     @Test

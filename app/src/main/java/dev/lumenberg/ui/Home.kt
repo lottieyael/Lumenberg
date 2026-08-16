@@ -42,6 +42,7 @@ import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.UnfoldMore
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -176,14 +177,15 @@ fun Home(
             ) {
                 if (!homeRoleHeld) {
                     item {
-                        Card(tone = Tone.Accent) {
+                        Card {
                             Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Labelled(
-                                    "Press Home and Lumenberg is not there",
-                                    "Make it your default launcher.",
+                                    "Lumenberg is not your home screen",
+                                    "Pressing Home still opens your old launcher.",
                                     Modifier.weight(1f),
                                 )
-                                TextButton(onClick = onRequestHome) { Text("Fix") }
+                                Spacer(Modifier.width(12.dp))
+                                FilledTonalButton(onClick = onRequestHome) { Text("Choose") }
                             }
                         }
                     }
@@ -314,11 +316,13 @@ private fun Crown(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
-                Text(
-                    if (editing) "Arranging widgets" else "Ask. Glance. Launch.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                if (editing) {
+                    Text(
+                        "Arranging widgets",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             if (editing) {
                 TextButton(onClick = onDoneEditing) { Text("Done") }

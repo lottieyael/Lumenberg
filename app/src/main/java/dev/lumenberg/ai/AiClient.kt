@@ -26,7 +26,7 @@ class AiClient {
     suspend fun models(account: Account): List<String> = withContext(Dispatchers.IO) {
         val data = JSONObject(get(account, "/models")).optJSONArray("data") ?: JSONArray()
         (0 until data.length())
-            .mapNotNull { data.optJSONObject(it)?.optString("id")?.takeIf(String::isNotBlank) }
+            .mapNotNull { data.optJSONObject(it)?.takeIf { o -> !o.isNull("id") }?.optString("id")?.takeIf(String::isNotBlank) }
             // Google lists ids as "models/gemini-…" but its chat route wants the bare name.
             .map { it.removePrefix("models/") }
             .distinct()
@@ -125,13 +125,23 @@ class AiClient {
         return token
     }
 
-    private fun tokenOf(event: JSONObject): String? {
+    internal fun tokenOf(event: JSONObject): String? {
         event.optJSONArray("choices")?.optJSONObject(0)?.let { choice ->
             val delta = choice.optJSONObject("delta") ?: choice.optJSONObject("message")
-            delta?.optString("content")?.takeIf(String::isNotEmpty)?.let { return it }
+            // Deliberately not reasoning_content: a reasoning model's scratchpad is not
+            // an answer, and a home screen is the wrong place to read one.
+            delta?.text("content")?.let { return it }
         }
-        return event.optJSONObject("delta")?.optString("text")?.takeIf(String::isNotEmpty)
+        return event.optJSONObject("delta")?.text("text")
     }
+
+    /**
+     * `optString` answers with the four characters "null" when a field is JSON null,
+     * which is how a reasoning model's empty content chunks turn into nullnullnull
+     * on screen. This returns nothing for nothing.
+     */
+    private fun JSONObject.text(key: String): String? =
+        if (isNull(key)) null else optString(key).takeIf { it.isNotEmpty() }
 
     /**
      * Anthropic rejects a history that does not strictly alternate starting from the user,

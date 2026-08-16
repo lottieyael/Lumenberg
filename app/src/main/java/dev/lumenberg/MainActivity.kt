@@ -34,6 +34,7 @@ import dev.lumenberg.ai.Provider
 import dev.lumenberg.core.AppRepository
 import dev.lumenberg.ui.Connect
 import dev.lumenberg.ui.Home
+import dev.lumenberg.ui.Look
 import dev.lumenberg.ui.LumenbergTheme
 import dev.lumenberg.ui.Motion
 import dev.lumenberg.ui.Onboarding
@@ -61,7 +62,7 @@ class MainActivity : ComponentActivity() {
     private var voice by mutableStateOf<String?>(null)
     private var overlay by mutableStateOf(Overlay.None)
     private var step by mutableIntStateOf(0)
-    private var dynamicColour by mutableStateOf(true)
+    private var look by mutableStateOf(Look())
     private var signingIn by mutableStateOf(false)
     private var signInError by mutableStateOf<String?>(null)
     private var connectFrom = Overlay.Settings
@@ -100,14 +101,14 @@ class MainActivity : ComponentActivity() {
         session = Session(this, lifecycleScope)
         auth = OpenRouterAuth(this)
 
-        dynamicColour = prefs.getBoolean("dynamic", true)
+        look = Look.load(this)
         overlay = if (prefs.getBoolean("onboarded", false)) Overlay.None else Overlay.Onboarding
         reloadPanels()
         refreshHomeRole()
         handleAuthRedirect(intent)
 
         setContent {
-            LumenbergTheme(dynamic = dynamicColour) {
+            LumenbergTheme(look = look) {
                 val apps by repository.apps.collectAsState()
 
                 Home(
@@ -148,8 +149,8 @@ class MainActivity : ComponentActivity() {
                             SettingsPane(
                                 session = session,
                                 homeRoleHeld = homeRoleHeld,
-                                dynamicColour = dynamicColour,
-                                onDynamicColour = ::useDynamicColour,
+                                look = look,
+                                onLook = ::useLook,
                                 onRequestHome = ::requestHomeRole,
                                 onConnect = ::openConnect,
                                 onAddWidget = ::addWidget,
@@ -351,20 +352,38 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Opening the system's default-home picker.
+     *
+     * `createRequestRoleIntent(ROLE_HOME)` is the obvious call and it is a trap: on recent
+     * Android the platform declines to show a dialog for the home role, so the intent
+     * resolves, the activity starts, nothing appears, and the button looks broken. The
+     * settings screen is what actually works, so it is tried first and each fallback is
+     * checked for a handler rather than fired hopefully.
+     */
     private fun requestHomeRole() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val manager = getSystemService(RoleManager::class.java) ?: return
-            if (manager.isRoleAvailable(RoleManager.ROLE_HOME) && !manager.isRoleHeld(RoleManager.ROLE_HOME)) {
-                runCatching { startActivity(manager.createRequestRoleIntent(RoleManager.ROLE_HOME)) }
-                return
+        val candidates = buildList {
+            add(Intent(Settings.ACTION_HOME_SETTINGS))
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                getSystemService(RoleManager::class.java)
+                    ?.takeIf { it.isRoleAvailable(RoleManager.ROLE_HOME) }
+                    ?.let { add(it.createRequestRoleIntent(RoleManager.ROLE_HOME)) }
             }
+            add(
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                    .setData(Uri.fromParts("package", packageName, null)),
+            )
         }
-        runCatching { startActivity(Intent(Settings.ACTION_HOME_SETTINGS)) }
+        for (intent in candidates) {
+            if (intent.resolveActivity(packageManager) == null) continue
+            if (runCatching { startActivity(intent) }.isSuccess) return
+        }
+        session.report("This phone has no screen for choosing a default home app.")
     }
 
-    private fun useDynamicColour(on: Boolean) {
-        dynamicColour = on
-        prefs.edit().putBoolean("dynamic", on).apply()
+    private fun useLook(next: Look) {
+        look = next
+        next.save(this)
     }
 
     private fun finishOnboarding() {

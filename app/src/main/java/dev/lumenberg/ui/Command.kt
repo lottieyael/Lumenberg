@@ -81,7 +81,8 @@ fun CommandBar(
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(30.dp),
-        color = scheme.surfaceContainerHigh,
+        color = scheme.surfaceContainerHigh.copy(alpha = LocalSurfaceAlpha.current),
+        contentColor = scheme.onSurface,
         shadowElevation = 10.dp,
     ) {
         Row(

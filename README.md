@@ -1,141 +1,119 @@
 # Lumenberg
 
-An Android home screen with one surface: your wallpaper, the widgets you actually read,
-and a bar that either launches an app or answers a question.
-
-No pages to swipe. No folders to maintain. No grid of icons you stopped seeing.
+An open-source Android launcher written in Kotlin and Jetpack Compose. One home screen over
+the wallpaper, with widgets and a single command bar at the bottom. There is no app grid, no
+pages and no folders. minSdk 28, compileSdk 37.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ## What it does
 
-**Type.** Results appear on the first keystroke, from an in-memory list, with no network
-call. `gm` finds Google Maps. `spty` finds Spotify. `map` puts Maps above Maps Go.
+**Command bar.** Typing filters the installed app list. Pressing send instead passes the text
+to a configured AI assistant, whose reply streams into a card above the bar. The assistant is
+given the labels of installed apps, so it can launch one when asked.
 
-**Ask.** If what you typed is not an app, press send and it goes to your assistant. The
-reply streams into a card above the bar. The assistant knows which apps you have, so
-"open the thing I take notes in" launches it.
+**Search.** Instant, in-memory, no network. It matches on exact name, prefix, word prefix,
+initials (`gm` finds Google Maps), substring, and dropped-letter subsequence (`spty` finds
+Spotify). Local launch counts break ties between equal matches.
 
-**Glance.** Real Android widgets, hosted directly, in the order you put them, at the
-height you chose. Lumenberg picks them with its own catalogue showing what each one looks
-like, rather than handing you the system's alphabetical list. Tap the handle on a widget
-to rearrange.
+**Widgets.** Real Android widgets hosted through `AppWidgetHost`. They are added from
+Lumenberg's own in-app catalogue rather than the system `ACTION_APPWIDGET_PICK` picker, which
+is a bare list and crashes on some builds.
+
+**Appearance.** Light, dark or follow-system; a choice of accent colour including
+wallpaper-derived Material You; adjustable surface opacity for the cards over the wallpaper.
 
 ## Connecting an assistant
 
-Lumenberg is a complete launcher without one. If you want one:
+An assistant is optional. The launcher is fully usable without one.
 
-| | How you sign in |
+| Provider | Sign-in |
 |---|---|
-| **OpenRouter** | Browser round trip. You never see or type a key. Bills one account across every model. |
-| **GitHub Copilot** | Device flow: GitHub shows a box, you type a short code. Uses the Copilot seat you already pay for. Needs a client id, see below. |
-| OpenAI, Anthropic, Google, DeepSeek | Paste a key from their console. There is a button that takes you to the right page. |
-| Ollama / LM Studio | Type the address of your own machine. No credential at all. |
+| OpenRouter | OAuth with PKCE in the browser. No API key is shown or typed. |
+| GitHub Copilot | GitHub OAuth device flow, using an existing Copilot seat. Requires a client id, see below. |
+| OpenAI, Anthropic, Google Gemini, DeepSeek | Paste an API key. Each option links to the provider's key page. |
+| Ollama / LM Studio | Type the machine's address on the local network. No credential. |
 
-### GitHub Copilot needs a client id
+After connecting, Lumenberg queries the provider's `/models` endpoint and picks a default.
+There is no URL or model id to type.
 
-Copilot is the one subscription that a third-party app may legitimately use: GitHub
-documents applications making Copilot requests on behalf of a user who authorised them.
-It needs an OAuth App that belongs to *your* build, because borrowing another product's
-client id is the pattern the other vendors ban.
+Credentials are encrypted with a hardware-backed AES-GCM key from the Android Keystore before
+being written to disk.
 
-Register one at [github.com/settings/developers](https://github.com/settings/developers)
-with device flow enabled, then put its id in `CLIENT_ID` in
-[GitHubAuth.kt](app/src/main/java/dev/lumenberg/ai/GitHubAuth.kt). A device-flow client id
-carries no secret, so shipping it in the APK is safe. Until you set one, the Copilot option
-says so instead of failing.
+### GitHub Copilot client id
 
-Once connected, Lumenberg asks the provider which models the account can use and picks a
-sensible one. You never type a URL, a model id, or a path.
+Copilot requires a GitHub OAuth App client id compiled into the build. Register one at
+[github.com/settings/developers](https://github.com/settings/developers) with device flow
+enabled, then set it as `CLIENT_ID` in
+[GitHubAuth.kt](app/src/main/java/dev/lumenberg/ai/GitHubAuth.kt). A device-flow client id has
+no secret, so shipping it in an APK is safe, but it must be your own. Until one is set, the
+Copilot option says so rather than failing.
 
-**A ChatGPT Plus or Claude Pro subscription will not work here.** Subscription sign-in
-does exist — it is what backs OpenAI's Codex CLI and Anthropic's Claude Code — but both
-vendors have closed it to everyone else. Anthropic's terms have prohibited subscription
-OAuth tokens in third-party tools since February 2026 and it has been enforced since April,
-with account bans. OpenAI's credential is scoped to Codex; their own documentation points
-you at a Platform API key for anything else, and third-party clients reusing the Codex
-client id are refused at token exchange.
+### Subscription logins are not supported
 
-So this is a licensing wall, not a technical one, and a launcher that climbed it would get
-its users banned. Google went the same way: it banned Gemini CLI's OAuth in third-party
-tools in February 2026, enforced it from March, and removed Code Assist for consumer
-accounts entirely in June.
+ChatGPT Plus and Claude Pro subscriptions cannot be used. Subscription OAuth exists, and backs
+OpenAI's Codex CLI and Anthropic's Claude Code, but both vendors restrict it to their own
+clients. Anthropic prohibited subscription OAuth tokens in third-party tools in its February
+2026 terms and began enforcing in April 2026 with account bans. Google banned third-party use
+of Gemini CLI's OAuth in February 2026, enforced it from March, and removed Gemini Code Assist
+for consumer accounts in June 2026.
 
-GitHub is the exception, which is why Copilot is in the table above. Otherwise OpenRouter
-is the closest honest equivalent: one account, one sign-in, every major model.
+GitHub is the exception: it documents third-party applications making Copilot requests on
+behalf of an authorising user, which is why Copilot is supported.
 
-Keys are sealed with a hardware-backed AES-GCM key from the Android Keystore before they
-touch disk.
+## Privacy
 
-## What it does not do
-
-- Send anything anywhere on its own. App-use counts stay on the device and exist only to
-  order search results.
-- Replace your notification shade, recents, or gesture navigation. That is the system's job.
-- Work with subscription logins. See above.
-
-Your assistant provider does see the text you type and the names of your installed apps.
-That is the whole of what leaves the phone, and only when you press send.
+App launch counts are stored locally, used only to order search results, and never uploaded.
+The AI provider receives the text you type and the labels of your installed apps, only when
+you press send. There is no analytics or telemetry.
 
 ## Install
 
-Download the APK from [Releases](../../releases), install it, then press Home and pick
-Lumenberg.
-
-```bash
-adb install Lumenberg-0.2.0.apk
-```
+Download the APK from [Releases](../../releases), install it (`adb install
+Lumenberg-0.2.0.apk`), then press Home and select Lumenberg.
 
 ## Build
 
-Needs JDK 17 and an Android SDK with platform 37. The Gradle wrapper handles the rest.
+Requires JDK 17 and Android SDK platform 37.
 
 ```bash
 ./gradlew testDebugUnitTest assembleDebug
 ```
 
-The APK lands in `app/build/outputs/apk/debug/`.
+The APK is written to `app/build/outputs/apk/debug/`.
 
-Release builds run through R8 with resource shrinking, which is the difference between a
-2.4 MB launcher and a 44 MB one. They are signed with the debug key so they install
-without ceremony; replace `signingConfig` in [app/build.gradle.kts](app/build.gradle.kts)
-before you distribute anything of your own.
+Release builds run through R8 with resource shrinking (2.4 MB versus 44 MB unshrunk) and are
+signed with the debug key for convenience. Replace `signingConfig` in
+[app/build.gradle.kts](app/build.gradle.kts) before distributing a build. Releases are
+published locally with `gh`; there is no CI.
 
-## Layout
+## Source layout
 
 ```
-ai/          Providers, the account and its keystore-sealed credential, streaming client,
-             OpenRouter PKCE sign-in
-core/        Installed-app list, ranking, icon cache
-widgets/     The widget catalogue, and what is on screen in what order at what height
-ui/          Theme and motion, the command bar, the sheets, the home screen
+ai/        Provider definitions, account storage and Keystore sealing, streaming
+           client, OpenRouter PKCE and GitHub device flow
+core/      Installed app list, search ranking, icon cache
+widgets/   Widget catalogue, and which widgets are placed in what order at what height
+ui/        Theme, command bar, sheets, home screen
 ```
 
-Roughly 2,000 lines, with 28 unit tests over the parts where being wrong is expensive:
-search ranking, provider address handling, model choice, conversation repair, and the
-rule that decides whether the assistant may open an app.
+Roughly 2,000 lines of Kotlin, with 33 unit tests covering search ranking, host address
+normalisation, model selection, conversation history repair, and the rule deciding whether the
+assistant may launch an app.
 
 ## Known limits
 
-Stated plainly, because a launcher that overpromises is one you cannot trust with Home.
-
-- Verified on an API 35 x86_64 emulator only: first run, home role, search and launch,
-  adding and arranging a real Calendar widget. OEM skins (HyperOS, One UI) are untested
-  and are where launchers usually break.
-- The AI path is exercised by unit tests, not against live provider endpoints. Nobody has
-  signed in to OpenRouter or Copilot from a real build yet.
-- Copilot's seat-token exchange uses `copilot_internal/v2/token`, which is what every
-  client outside GitHub's own SDK uses, but GitHub has not committed to it. If it moves,
-  Copilot breaks and the other providers do not.
-- Work profiles and secondary users are not listed; the current user only.
-- Widget heights are chosen from four steps rather than dragged, and the cycle wraps from
+- Tested on an API 35 x86_64 emulator and one physical device. OEM skins are largely untested.
+- OpenRouter and Copilot sign-in have not been verified end to end against live endpoints.
+- Copilot's seat token exchange uses `api.github.com/copilot_internal/v2/token`. Every client
+  outside GitHub's own SDK uses it, but GitHub has not committed to it as a stable API.
+- Work profiles and secondary users are not listed. Current user only.
+- Widget heights are chosen from four preset steps rather than dragged, and cycling wraps from
   the largest step back to the smallest.
-- A widget keeps the provider metadata it had when it was added until the launcher process
-  restarts, so a widget's app updating itself will not resize it.
-- The assistant's ability to launch apps depends on the model following one instruction.
-  Small local models will sometimes ignore it.
-- `usesCleartextTraffic` is on so a self-hosted machine on your LAN can be reached over
-  HTTP. Addresses that are not plainly local are sent to HTTPS instead.
+- A hosted widget keeps the provider metadata it had when it was added until the launcher
+  process restarts.
+- `usesCleartextTraffic` is enabled so a self-hosted machine on the LAN can be reached over
+  HTTP. Addresses that are not plainly local default to HTTPS.
 
 ## Licence
 

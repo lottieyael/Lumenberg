@@ -1,5 +1,6 @@
 package dev.lumenberg.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -35,7 +37,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -47,6 +48,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -339,8 +342,8 @@ private fun Badge(text: String) {
 fun Settings(
     session: Session,
     homeRoleHeld: Boolean,
-    dynamicColour: Boolean,
-    onDynamicColour: (Boolean) -> Unit,
+    look: Look,
+    onLook: (Look) -> Unit,
     onRequestHome: () -> Unit,
     onConnect: () -> Unit,
     onAddWidget: () -> Unit,
@@ -391,15 +394,38 @@ fun Settings(
     }
 
     Card {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Labelled("Wallpaper colours", "Match the palette to your wallpaper.", Modifier.weight(1f))
-                Switch(checked = dynamicColour, onCheckedChange = onDynamicColour)
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Labelled("Widgets", "Add anything that publishes an Android widget.", Modifier.weight(1f))
-                OutlinedButton(onClick = onAddWidget) { Text("Add") }
-            }
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text("Appearance", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+
+            Choice(
+                label = "Theme",
+                options = Appearance.entries,
+                selected = look.appearance,
+                name = { it.label },
+                onSelect = { onLook(look.copy(appearance = it)) },
+            )
+            Choice(
+                label = "Colour",
+                options = Accent.entries.filter { it.available },
+                selected = look.accent,
+                name = { it.label },
+                swatch = { if (it == Accent.Wallpaper) null else it.onDark },
+                onSelect = { onLook(look.copy(accent = it)) },
+            )
+            Choice(
+                label = "Card background",
+                options = Surfaces.entries,
+                selected = look.surface,
+                name = { it.label },
+                onSelect = { onLook(look.copy(surface = it)) },
+            )
+        }
+    }
+
+    Card {
+        Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+            Labelled("Widgets", "Add anything that publishes an Android widget.", Modifier.weight(1f))
+            OutlinedButton(onClick = onAddWidget) { Text("Add") }
         }
     }
 
@@ -409,6 +435,44 @@ fun Settings(
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+}
+
+/** One row of the appearance settings. */
+@Composable
+private fun <T> Choice(
+    label: String,
+    options: List<T>,
+    selected: T,
+    name: (T) -> String,
+    swatch: ((T) -> Color?)? = null,
+    onSelect: (T) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            options.forEach { option ->
+                FilterChip(
+                    selected = option == selected,
+                    onClick = { onSelect(option) },
+                    label = { Text(name(option)) },
+                    leadingIcon = swatch?.invoke(option)?.let { colour ->
+                        {
+                            Box(
+                                Modifier
+                                    .size(14.dp)
+                                    .clip(CircleShape)
+                                    .background(colour),
+                            )
+                        }
+                    },
+                )
+            }
+        }
+    }
 }
 
 /** Long model lists are unusable as a wall of chips, so this shows the top ones and a filter. */
