@@ -6,7 +6,6 @@ An experimental, open-source Android launcher built around three verbs:
 
 It deliberately avoids pages, folders, and a permanent icon grid.
 
-[![CI](https://github.com/lottieyael/Lumenberg/actions/workflows/ci.yml/badge.svg)](https://github.com/lottieyael/Lumenberg/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ## v0.1
@@ -46,7 +45,15 @@ The APK lands in `app/build/outputs/apk/debug/`.
 
 ## Releases
 
-Push a tag like `v0.1.0` and CI builds and publishes a GitHub Release with the APK attached. Release artifacts are signed with the standard debug key so they install out of the box — swap in your own signing config in `app/build.gradle.kts` before distributing.
+Releases are built and published locally (no CI):
+
+```sh
+./gradlew testDebugUnitTest assembleRelease
+gh release create v0.1.0 --title "v0.1.0" --notes "..." \
+    app/build/outputs/apk/release/app-release.apk
+```
+
+Release APKs are signed with the standard debug key so they install out of the box — swap in your own signing config in `app/build.gradle.kts` before distributing.
 
 ## AI configuration
 

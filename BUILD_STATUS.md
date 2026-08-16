@@ -7,7 +7,6 @@
 - `SearchRanker` unit test passes.
 - Toolchain note: AGP 9.3.1 embeds Kotlin 2.2.10, so the Compose compiler plugin is pinned
   to 2.2.10 (the original source bundle pinned 2.3.21, which does not match AGP's built-in Kotlin).
-- CI builds a debug APK on every push and publishes a GitHub Release on `v*` tags.
 
 ## UNVERIFIED
 
