@@ -64,6 +64,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.lumenberg.ai.SignIn
+import dev.lumenberg.agent.AgentService
 import dev.lumenberg.gestures.Gestures
 import kotlinx.coroutines.launch
 
@@ -496,6 +497,7 @@ fun Settings(
     }
 
     GestureSettings(onOpenAccessibility)
+    DoingSettings(onOpenAccessibility)
 
     Text(
         "App use is counted on this device only, to order search results. Nothing is uploaded. " +
@@ -503,6 +505,62 @@ fun Settings(
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+}
+
+/**
+ * Letting the assistant use the phone. This is the largest thing the user can grant, so
+ * the screen says what leaves the device rather than selling the feature.
+ */
+@Composable
+private fun DoingSettings(onOpenAccessibility: () -> Unit) {
+    val context = LocalContext.current
+    val lifecycle = LocalLifecycleOwner.current
+    var running by remember { mutableStateOf(AgentService.running) }
+
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) running = AgentService.running
+        }
+        lifecycle.lifecycle.addObserver(observer)
+        onDispose { lifecycle.lifecycle.removeObserver(observer) }
+    }
+
+    Card {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Labelled(
+                    "Let the assistant use your apps",
+                    if (running) "On. Turn it off in Accessibility." else "Off.",
+                    Modifier.weight(1f),
+                )
+                if (running) {
+                    Icon(
+                        Icons.Rounded.Check,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+            Text(
+                "Ask for something and Lumenberg does it in your apps instead of telling you " +
+                    "how. It asks before pressing anything it recognises as sending, buying " +
+                    "or deleting, though it cannot recognise every such button.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                "While a request is running, the text and buttons on screen go to your " +
+                    "assistant provider so it can tell what it is looking at, including in " +
+                    "whatever app it opens for you. Passwords are left out. Nothing is sent " +
+                    "when no request is running. Leave this off if that is not a trade you want.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (!running) {
+                Button(onClick = onOpenAccessibility) { Text("Turn on in Accessibility") }
+            }
+        }
+    }
 }
 
 /**

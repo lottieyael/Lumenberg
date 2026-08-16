@@ -2,4 +2,6 @@
 <resources>
     <string name="gestures_description">Adds swipe navigation for devices that switch third-party launchers back to on-screen buttons. Swipe in from either side for Back, up from the bottom for Home, up and hold for Recents.\n\nThis service cannot read the contents of your screen. It is declared without that ability, and it is used only to press Back, Home and Recents.</string>
     <string name="gestures_summary">Swipe navigation for Lumenberg</string>
+    <string name="agent_summary">Doing things for you in other apps</string>
+    <string name="agent_description">Lets Lumenberg carry out a request by using your apps the way you would: reading what is on the screen and pressing things.\n\nWhile a request is running, the text and buttons on screen are sent to the assistant provider you chose, so it can tell what it is looking at. That includes whatever app it opens for you. Passwords are left out. Nothing is sent when no request is running.\n\nIt asks before pressing anything it recognises as sending, buying or deleting, but it cannot recognise every such button. Turn this off here at any time.</string>
 </resources>

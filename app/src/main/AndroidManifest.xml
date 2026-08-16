@@ -63,5 +63,20 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/gestures" />
         </service>
+
+        <!-- Reads the screen and presses things, only while carrying out a request.
+             Separate from the gesture service so either can be off. -->
+        <service
+            android:name=".agent.AgentService"
+            android:exported="true"
+            android:label="@string/agent_summary"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/agent" />
+        </service>
     </application>
 </manifest>

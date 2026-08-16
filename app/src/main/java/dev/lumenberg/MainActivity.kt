@@ -193,9 +193,11 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         handleAuthRedirect(intent)
         // Pressing Home while already here should feel like arriving, not like nothing happened.
+        // Not while a request is being carried out: the agent presses Home itself, and so
+        // does a user checking on progress. Clearing here killed the run that caused it.
         if (intent.hasCategory(Intent.CATEGORY_HOME) && overlay != Overlay.Onboarding) {
             overlay = Overlay.None
-            session.clear()
+            if (!session.busy) session.clear()
         }
     }
 

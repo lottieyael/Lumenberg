@@ -42,6 +42,29 @@ the buttons remain and these gestures sit alongside them.
 Using an accessibility service this way is against Google Play policy. That does not affect
 GitHub releases, but it would rule out Play distribution.
 
+**Doing things.** Optional, off by default, and separate from swipe navigation. With it on,
+a request is carried out in your apps rather than answered with instructions: the assistant
+is shown what is on screen, replies with one action at a time (open, tap, type, scroll,
+back), and Lumenberg performs it. The user sees progress and the result, not the steps.
+
+`performGlobalAction` and reading the screen both require an accessibility service, so this
+is a second one, enabled separately from the gesture service and declared with the
+screen-reading capability the gesture service deliberately lacks.
+
+What leaves the device while a request runs: the foreground package name, the visible text,
+and the labels of controls, sent to the assistant provider you configured. Password fields
+are skipped. Nothing is sent when no request is running. There is no other redaction, so a
+banking app or a visible one-time code would be included if it is on screen at the time.
+
+Before pressing anything whose label looks like sending, buying or deleting, it asks first,
+as an overlay above whatever app is in front. That check is a word list: it does not read
+unlabelled icons and it only knows English, so it treats an unlabelled control as worth
+asking about and errs towards asking too often. It is a speed bump, not a guarantee.
+
+Sending accessibility-derived screen content to a third-party server is against Google Play
+policy, as is using an accessibility service for gesture navigation. Neither affects GitHub
+releases.
+
 ## Connecting an assistant
 
 An assistant is optional. The launcher is fully usable without one.
@@ -93,7 +116,7 @@ you press send. There is no analytics or telemetry.
 ## Install
 
 Download the APK from [Releases](../../releases), install it (`adb install
-Lumenberg-0.4.1.apk`), then press Home and select Lumenberg.
+Lumenberg-0.5.0.apk`), then press Home and select Lumenberg.
 
 ## Build
 

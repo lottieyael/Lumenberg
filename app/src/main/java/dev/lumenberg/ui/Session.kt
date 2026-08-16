@@ -12,6 +12,10 @@ import dev.lumenberg.ai.DeviceCode
 import dev.lumenberg.ai.GitHubAuth
 import dev.lumenberg.ai.Provider
 import dev.lumenberg.ai.Turn
+import dev.lumenberg.agent.Agent
+import dev.lumenberg.agent.AgentService
+import dev.lumenberg.agent.Outcome
+
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -44,10 +48,19 @@ class Session(context: Context, private val scope: CoroutineScope) {
 
     private var job: Job? = null
 
+    /** Set while a request is being carried out; the text is what the user is shown. */
+    var working by mutableStateOf<String?>(null)
+        private set
+
+    /** The request a follow-up question belongs to, so an answer resumes it. */
+    private var pending: String? = null
+
+
+
     /** The account currently answering. */
     val account: Account get() = accounts.getOrNull(active) ?: Account()
 
-    val busy: Boolean get() = streaming != null
+    val busy: Boolean get() = streaming != null || working != null
     val ready: Boolean get() = account.ready
     val running: Boolean get() = turns.isNotEmpty() || busy || error != null
 
@@ -126,18 +139,32 @@ class Session(context: Context, private val scope: CoroutineScope) {
     /**
      * [onOpen] is asked to launch an app by name and answers whether it managed to.
      */
-    fun ask(text: String, apps: List<String>, onOpen: (String) -> Boolean) {
+    fun ask(text: String, apps: () -> List<String>, onOpen: (String) -> Boolean) {
         if (text.isBlank() || busy) return
         error = null
         turns += Turn("user", text)
         trim()
+
+        // With permission to use the phone, every request goes through the same path and
+        // the model decides whether it can just answer or has to go and do something.
+        if (AgentService.running) {
+            // An answer to the agent's own question resumes that request rather than
+            // starting a new one, which used to strand the model with a bare "the saved one".
+            val task = pending?.let { "$it\n\nThe user was asked a question and answered: $text" }
+                ?: text
+            pending = null
+            runTask(task, apps, onOpen)
+            return
+        }
+
         streaming = ""
+        val names = apps()
         val history = turns.toList()
         job = scope.launch {
             val sink = StringBuilder()
             var lastPush = 0L
             runCatching {
-                client.send(account, history, apps) { token ->
+                client.send(account, history, names) { token ->
                     sink.append(token)
                     // One state write per token would be one recomposition per token.
                     // Pushing on a frame budget keeps the text alive and the list still.
@@ -177,6 +204,42 @@ class Session(context: Context, private val scope: CoroutineScope) {
     }
 
     /**
+     * Carries the request out on the phone. The user sees that something is happening and
+     * then the result, never the machinery.
+     */
+    private fun runTask(task: String, apps: () -> List<String>, onOpen: (String) -> Boolean) {
+        working = "Working"
+        val agent = Agent(client, apps, onOpen)
+        job = scope.launch {
+            val outcome = runCatching {
+                agent.run(
+                    task = task,
+                    account = account,
+                    onProgress = { where ->
+                        scope.launch(Dispatchers.Main) { working = where.ifBlank { "Working" } }
+                    },
+                    // Asked over whichever app is in front, since the launcher is not.
+                    onConfirm = { question ->
+                        AgentService.live?.confirm(question) ?: false
+                    },
+                )
+            }.getOrElse { Outcome.Failed(it.message ?: "That did not go through.") }
+
+            withContext(NonCancellable + Dispatchers.Main) {
+                working = null
+                when (outcome) {
+                    is Outcome.Said -> turns += Turn("assistant", outcome.text)
+                    is Outcome.Asked -> {
+                        pending = task
+                        turns += Turn("assistant", outcome.question)
+                    }
+                    is Outcome.Failed -> error = outcome.reason
+                }
+            }
+        }
+    }
+
+    /**
      * Runs GitHub's device flow to the end and keeps the account. Returns null on success
      * or a sentence to show; [onCode] fires as soon as there is a code to display.
      */
@@ -203,11 +266,14 @@ class Session(context: Context, private val scope: CoroutineScope) {
         job?.cancel()
         job = null
         streaming = null
+        working = null
+        AgentService.live?.dismissAsk()
     }
 
     fun clear() {
         stop()
         turns.clear()
+        pending = null
         error = null
     }
 

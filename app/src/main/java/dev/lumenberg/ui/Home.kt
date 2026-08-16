@@ -60,6 +60,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -97,6 +99,16 @@ fun Home(
     var drawer by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf(false) }
     val focus = rememberCommandFocus()
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+
+    /** Leaving search should take the keyboard with it. */
+    fun dismiss() {
+        query = ""
+        drawer = false
+        keyboard?.hide()
+        focusManager.clearFocus(force = true)
+    }
 
     val searching = query.isNotBlank() || drawer
     val results = remember(query, apps, drawer) {
@@ -116,25 +128,27 @@ fun Home(
     }
 
     fun open(app: LauncherApp) {
-        if (repository.launch(app)) {
-            query = ""
-            drawer = false
-        }
+        if (repository.launch(app)) dismiss()
     }
 
     fun ask(text: String = query) {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return
-        val names = repository.ranked("", apps, 40).map { it.label }
-        session.ask(trimmed, names) { wanted ->
+        // Read live rather than snapshotted: a request sent before the app list finished
+        // loading used to hand the assistant an empty list, after which it could not open
+        // anything and was told every app it named did not exist.
+        session.ask(
+            text = trimmed,
+            apps = { repository.ranked("", repository.apps.value, 40).map { it.label } },
+        ) { wanted ->
             // Models paraphrase ("Google Chrome" for "Chrome"), so fall back to the same
             // ranking the search box uses rather than demanding an exact label.
-            val target = apps.firstOrNull { it.label.equals(wanted, ignoreCase = true) }
-                ?: repository.ranked(wanted, apps, 1).firstOrNull()
+            val current = repository.apps.value
+            val target = current.firstOrNull { it.label.equals(wanted, ignoreCase = true) }
+                ?: repository.ranked(wanted, current, 1).firstOrNull()
             target != null && repository.launch(target)
         }
-        query = ""
-        drawer = false
+        dismiss()
     }
 
     fun submit() {
@@ -152,7 +166,7 @@ fun Home(
     BackHandler(enabled = enabled && (searching || session.running || editing)) {
         when {
             editing -> editing = false
-            searching -> { query = ""; drawer = false }
+            searching -> dismiss()
             else -> session.clear()
         }
     }
@@ -228,7 +242,7 @@ fun Home(
 
         // Above the wallpaper content, below the command surface, so tapping the dimmed
         // area actually dismisses instead of landing on an invisible Column.
-        Scrim(visible = searching) { query = ""; drawer = false }
+        Scrim(visible = searching, onDismiss = ::dismiss)
 
         Box(
             Modifier
@@ -260,7 +274,7 @@ fun Home(
                     onQuery = { query = it },
                     onSubmit = ::submit,
                     onVoice = onStartVoice,
-                    onApps = { drawer = !drawer; query = "" },
+                    onApps = { if (drawer) dismiss() else { drawer = true; query = "" } },
                     onStop = session::stop,
                     focusRequester = focus,
                 )

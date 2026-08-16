@@ -112,6 +112,76 @@ class AiClient {
         finish(text.toString())
     }
 
+    /**
+     * One request, one answer, no streaming. Used by the agent loop, where the reply is a
+     * single small instruction rather than prose to watch arrive.
+     *
+     * The prefix is append-only across a run, which is what a provider's cache needs.
+     * Anthropic's breakpoint goes on the last message rather than the system block: the
+     * system prompt alone is a few hundred tokens, under the minimum that can be cached at
+     * all, whereas the accumulated screens are what actually grow large enough to matter.
+     * The OpenAI-shaped providers match prefixes themselves and need no marker.
+     */
+    suspend fun converse(account: Account, system: String, history: List<Turn>): String =
+        withContext(Dispatchers.IO) {
+            require(account.ready) { "No AI account is set up yet." }
+            val turns = alternating(history)
+            val anthropic = account.provider.wire == Wire.ANTHROPIC
+            val body = JSONObject().apply {
+                put("model", account.model)
+                put("stream", false)
+                // Enough that a real answer plus its JSON wrapper is never cut in half.
+                put("max_tokens", 1200)
+                if (anthropic) {
+                    put("system", system)
+                    put("messages", JSONArray().apply {
+                        turns.forEachIndexed { index, turn ->
+                            val content = if (index == turns.lastIndex) {
+                                JSONArray().put(
+                                    JSONObject()
+                                        .put("type", "text")
+                                        .put("text", turn.text)
+                                        .put("cache_control", JSONObject().put("type", "ephemeral")),
+                                )
+                            } else {
+                                turn.text
+                            }
+                            put(JSONObject().put("role", turn.role).put("content", content))
+                        }
+                    })
+                } else {
+                    put("messages", JSONArray().apply {
+                        put(JSONObject().put("role", "system").put("content", system))
+                        turns.forEach { put(JSONObject().put("role", it.role).put("content", it.text)) }
+                    })
+                }
+            }
+
+            val path = if (anthropic) "/messages" else "/chat/completions"
+            val connection = open(account, path, "POST")
+            val text = try {
+                connection.doOutput = true
+                connection.setRequestProperty("Accept", "application/json")
+                connection.outputStream.use { it.write(body.toString().toByteArray()) }
+                val status = connection.responseCode
+                val payload = (if (status in 200..299) connection.inputStream else connection.errorStream)
+                    ?.bufferedReader()?.use { it.readText() }.orEmpty()
+                if (status !in 200..299) throw AiError(humanize(status, payload, account))
+                payload
+            } finally {
+                connection.disconnect()
+            }
+
+            val json = JSONObject(text)
+            val reply = if (anthropic) {
+                json.optJSONArray("content")?.optJSONObject(0)?.let { if (it.isNull("text")) null else it.optString("text") }
+            } else {
+                json.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
+                    ?.let { if (it.isNull("content")) null else it.optString("content") }
+            }
+            reply?.takeIf { it.isNotBlank() } ?: throw AiError("The assistant returned nothing.")
+        }
+
     /** Drains one complete SSE event into [text], returning the token it carried. */
     private fun consume(event: StringBuilder, text: StringBuilder, account: Account): String? {
         val payload = event.toString().trimEnd('\n')

@@ -33,6 +33,7 @@ import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.SwapHoriz
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
@@ -214,7 +215,7 @@ fun Thread(
 
     // Animating on every token would restart the animation on every token, so it never
     // arrives. Completed turns animate; a live stream is just pinned to the bottom.
-    LaunchedEffect(turns.size, error) {
+    LaunchedEffect(turns.size, error, session.working) {
         state.animateScrollToItem(state.layoutInfo.totalItemsCount.coerceAtLeast(1) - 1)
     }
     LaunchedEffect(streaming != null) {
@@ -263,8 +264,11 @@ fun Thread(
                 items(turns.size) { i -> Bubble(turns[i]) }
                 streaming?.let { text ->
                     item {
-                        if (text.isEmpty()) Working() else Bubble(Turn("assistant", text))
+                        if (text.isEmpty()) Working("Thinking") else Bubble(Turn("assistant", text))
                     }
+                }
+                session.working?.let { where ->
+                    item { Working(where) }
                 }
                 error?.let { text ->
                     item {
@@ -307,12 +311,12 @@ private fun Bubble(turn: Turn) {
 }
 
 @Composable
-private fun Working() {
+private fun Working(label: String) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(6.dp)) {
         CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 2.dp)
         Spacer(Modifier.width(10.dp))
         Text(
-            "Thinking",
+            label,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
