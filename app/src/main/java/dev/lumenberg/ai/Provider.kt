@@ -21,6 +21,14 @@ enum class Provider(
         signIn = SignIn.OAUTH,
         prefer = listOf("openai/gpt", "anthropic/claude", "google/gemini"),
     ),
+    COPILOT(
+        id = "copilot",
+        label = "GitHub Copilot",
+        tagline = "Sign in with GitHub. Uses the Copilot seat you already pay for.",
+        base = "https://api.githubcopilot.com",
+        signIn = SignIn.DEVICE,
+        prefer = listOf("gpt", "claude"),
+    ),
     OPENAI(
         id = "openai",
         label = "OpenAI",
@@ -45,6 +53,14 @@ enum class Provider(
         signIn = SignIn.KEY,
         prefer = listOf("gemini"),
     ),
+    DEEPSEEK(
+        id = "deepseek",
+        label = "DeepSeek",
+        tagline = "DeepSeek's own API. Cheap, and strong at reasoning.",
+        base = "https://api.deepseek.com/v1",
+        signIn = SignIn.KEY,
+        prefer = listOf("deepseek"),
+    ),
     OLLAMA(
         id = "ollama",
         label = "On your network",
@@ -64,6 +80,7 @@ enum class Provider(
             OPENAI -> "https://platform.openai.com/api-keys"
             ANTHROPIC -> "https://console.anthropic.com/settings/keys"
             GOOGLE -> "https://aistudio.google.com/apikey"
+            DEEPSEEK -> "https://platform.deepseek.com/api_keys"
             else -> null
         }
 
@@ -75,6 +92,9 @@ enum class Provider(
 enum class SignIn {
     /** Browser round trip, no key ever typed or shown. */
     OAUTH,
+
+    /** Show a short code, the user types it into a browser on any device. */
+    DEVICE,
 
     /** Paste a key from the provider's console. */
     KEY,

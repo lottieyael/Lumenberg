@@ -92,4 +92,46 @@ class AiClientTest {
     fun `an empty catalogue yields nothing`() {
         assertNull(client.preferred(Provider.OPENAI, emptyList()))
     }
+
+    @Test
+    fun `DeepSeek picks its chat model over its other endpoints`() {
+        val models = listOf("deepseek-chat", "deepseek-reasoner")
+        assertEquals("deepseek-reasoner", client.preferred(Provider.DEEPSEEK, models))
+    }
+
+    @Test
+    fun `Copilot picks a current model from the seat catalogue`() {
+        val models = listOf("gpt-4o", "gpt-5", "claude-sonnet-4", "text-embedding-3-small")
+        assertEquals("gpt-5", client.preferred(Provider.COPILOT, models))
+    }
+
+    // --- provider wiring --------------------------------------------------
+
+    @Test
+    fun `every provider that needs no key says so, and every key provider explains where`() {
+        Provider.entries.forEach { provider ->
+            when (provider.signIn) {
+                SignIn.KEY -> assertEquals(
+                    "${provider.label} must tell users where to get a key",
+                    true,
+                    provider.keyUrl != null,
+                )
+                else -> assertNull(provider.keyUrl)
+            }
+        }
+    }
+
+    @Test
+    fun `only Anthropic uses its own wire format`() {
+        Provider.entries.forEach { provider ->
+            val expected = if (provider == Provider.ANTHROPIC) Wire.ANTHROPIC else Wire.OPENAI
+            assertEquals(expected, provider.wire)
+        }
+    }
+
+    @Test
+    fun `a saved provider id survives a round trip`() {
+        Provider.entries.forEach { assertEquals(it, Provider.of(it.id)) }
+        assertEquals(Provider.OPENROUTER, Provider.of("something-we-removed"))
+    }
 }

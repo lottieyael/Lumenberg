@@ -28,8 +28,22 @@ Lumenberg is a complete launcher without one. If you want one:
 | | How you sign in |
 |---|---|
 | **OpenRouter** | Browser round trip. You never see or type a key. Bills one account across every model. |
-| OpenAI, Anthropic, Google | Paste a key from their console. There is a button that takes you to the right page. |
+| **GitHub Copilot** | Device flow: GitHub shows a box, you type a short code. Uses the Copilot seat you already pay for. Needs a client id, see below. |
+| OpenAI, Anthropic, Google, DeepSeek | Paste a key from their console. There is a button that takes you to the right page. |
 | Ollama / LM Studio | Type the address of your own machine. No credential at all. |
+
+### GitHub Copilot needs a client id
+
+Copilot is the one subscription that a third-party app may legitimately use: GitHub
+documents applications making Copilot requests on behalf of a user who authorised them.
+It needs an OAuth App that belongs to *your* build, because borrowing another product's
+client id is the pattern the other vendors ban.
+
+Register one at [github.com/settings/developers](https://github.com/settings/developers)
+with device flow enabled, then put its id in `CLIENT_ID` in
+[GitHubAuth.kt](app/src/main/java/dev/lumenberg/ai/GitHubAuth.kt). A device-flow client id
+carries no secret, so shipping it in the APK is safe. Until you set one, the Copilot option
+says so instead of failing.
 
 Once connected, Lumenberg asks the provider which models the account can use and picks a
 sensible one. You never type a URL, a model id, or a path.
@@ -43,8 +57,12 @@ you at a Platform API key for anything else, and third-party clients reusing the
 client id are refused at token exchange.
 
 So this is a licensing wall, not a technical one, and a launcher that climbed it would get
-its users banned. OpenRouter is the closest honest equivalent: one account, one sign-in,
-every major model.
+its users banned. Google went the same way: it banned Gemini CLI's OAuth in third-party
+tools in February 2026, enforced it from March, and removed Code Assist for consumer
+accounts entirely in June.
+
+GitHub is the exception, which is why Copilot is in the table above. Otherwise OpenRouter
+is the closest honest equivalent: one account, one sign-in, every major model.
 
 Keys are sealed with a hardware-backed AES-GCM key from the Android Keystore before they
 touch disk.
@@ -104,7 +122,10 @@ Stated plainly, because a launcher that overpromises is one you cannot trust wit
   adding and arranging a real Calendar widget. OEM skins (HyperOS, One UI) are untested
   and are where launchers usually break.
 - The AI path is exercised by unit tests, not against live provider endpoints. Nobody has
-  signed in to OpenRouter from a real build yet.
+  signed in to OpenRouter or Copilot from a real build yet.
+- Copilot's seat-token exchange uses `copilot_internal/v2/token`, which is what every
+  client outside GitHub's own SDK uses, but GitHub has not committed to it. If it moves,
+  Copilot breaks and the other providers do not.
 - Work profiles and secondary users are not listed; the current user only.
 - Widget heights are chosen from four steps rather than dragged, and the cycle wraps from
   the largest step back to the smallest.

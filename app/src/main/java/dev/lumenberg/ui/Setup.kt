@@ -51,6 +51,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import dev.lumenberg.ai.Account
+import dev.lumenberg.ai.DeviceCode
 import dev.lumenberg.ai.Provider
 import dev.lumenberg.ai.SignIn
 import kotlinx.coroutines.launch
@@ -122,6 +123,7 @@ fun Connect(
     var secret by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var failure by remember { mutableStateOf<String?>(null) }
+    var device by remember { mutableStateOf<DeviceCode?>(null) }
     val scope = rememberCoroutineScope()
 
     // Signing in via the browser lands back here with the account already filled in.
@@ -158,7 +160,11 @@ fun Connect(
                 Modifier.clickable {
                     failure = null
                     secret = ""
-                    if (entry.signIn == SignIn.OAUTH) onOAuth() else chosen = entry
+                    device = null
+                    when (entry.signIn) {
+                        SignIn.OAUTH -> onOAuth()
+                        else -> chosen = entry
+                    }
                 },
             ) {
                 Row(
@@ -168,7 +174,7 @@ fun Connect(
                     Column(Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(entry.label, fontWeight = FontWeight.SemiBold)
-                            if (entry.signIn == SignIn.OAUTH) {
+                            if (entry.signIn == SignIn.OAUTH || entry.signIn == SignIn.DEVICE) {
                                 Spacer(Modifier.width(8.dp))
                                 Badge("no key needed")
                             }
@@ -200,6 +206,63 @@ fun Connect(
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+
+    if (provider.signIn == SignIn.DEVICE) {
+        val code = device
+        if (code == null) {
+            Text(
+                "GitHub will show you a box to type a short code into. Any device will do.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            Card(tone = Tone.Accent) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Type this code on GitHub", style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        code.userCode,
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(code.verificationUri, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            AssistChip(
+                onClick = { onOpenUrl(code.verificationUri) },
+                label = { Text("Open GitHub") },
+                leadingIcon = {
+                    Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null, Modifier.size(16.dp))
+                },
+            )
+        }
+
+        failure?.let {
+            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            OutlinedButton(onClick = { chosen = null; device = null }, enabled = !busy) { Text("Back") }
+            Button(
+                onClick = {
+                    busy = true
+                    failure = null
+                    scope.launch {
+                        failure = session.signInWithGitHub { device = it }
+                        busy = false
+                        if (failure == null) onDone()
+                    }
+                },
+                enabled = !busy,
+            ) {
+                if (busy) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(if (busy) "Waiting for GitHub" else "Start sign-in")
+            }
+        }
+        return
+    }
 
     OutlinedTextField(
         value = secret,

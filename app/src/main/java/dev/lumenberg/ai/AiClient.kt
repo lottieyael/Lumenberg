@@ -209,7 +209,8 @@ class AiClient {
     }
 
     private fun open(account: Account, path: String, method: String): HttpURLConnection {
-        val url = URL(account.base + path)
+        val seat = if (account.provider == Provider.COPILOT) copilotSeat(account) else null
+        val url = URL((seat?.api ?: account.base) + path)
         if (url.protocol != "https" && account.provider.signIn != SignIn.HOST) {
             throw AiError("${account.provider.label} must be reached over HTTPS.")
         }
@@ -219,6 +220,12 @@ class AiClient {
             readTimeout = 90_000
             setRequestProperty("Content-Type", "application/json")
             when {
+                seat != null -> {
+                    setRequestProperty("Authorization", "Bearer ${seat.token}")
+                    // Copilot refuses requests that do not say what is asking.
+                    setRequestProperty("Editor-Version", "Lumenberg/1.0")
+                    setRequestProperty("Copilot-Integration-Id", "vscode-chat")
+                }
                 account.credential.isBlank() -> Unit
                 account.provider.wire == Wire.ANTHROPIC -> {
                     setRequestProperty("x-api-key", account.credential)
@@ -231,6 +238,51 @@ class AiClient {
                 setRequestProperty("X-Title", "Lumenberg")
             }
         }
+    }
+
+    private data class Seat(val token: String, val expiresAt: Long, val api: String)
+
+    @Volatile private var seat: Seat? = null
+
+    /**
+     * A GitHub OAuth token is durable but not what Copilot accepts; it is traded for a
+     * short-lived seat token that expires in minutes, so this caches one and renews early.
+     */
+    private fun copilotSeat(account: Account): Seat {
+        val now = System.currentTimeMillis() / 1000
+        seat?.takeIf { it.expiresAt - 60 > now }?.let { return it }
+
+        val connection = (URL(SEAT_URL).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 12_000
+            readTimeout = 20_000
+            setRequestProperty("Authorization", "Bearer ${account.credential}")
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("Editor-Version", "Lumenberg/1.0")
+        }
+        val text = try {
+            val status = connection.responseCode
+            val body = (if (status in 200..299) connection.inputStream else connection.errorStream)
+                ?.bufferedReader()?.use { it.readText() }.orEmpty()
+            when {
+                status == 401 || status == 403 ->
+                    throw AiError("Your GitHub sign-in no longer has a Copilot seat. Sign in again.")
+                status !in 200..299 -> throw AiError(humanize(status, body, account))
+            }
+            body
+        } finally {
+            connection.disconnect()
+        }
+
+        val json = JSONObject(text)
+        val token = json.optString("token").takeIf { it.isNotBlank() }
+            ?: throw AiError("GitHub did not return a Copilot token for this account.")
+        return Seat(
+            token = token,
+            expiresAt = json.optLong("expires_at", now + 300),
+            api = json.optJSONObject("endpoints")?.optString("api")?.takeIf { it.isNotBlank() }
+                ?: Provider.COPILOT.base,
+        ).also { seat = it }
     }
 
     /** Users do not know what a 429 is. */
@@ -255,6 +307,8 @@ class AiClient {
     }
 
     private companion object {
+        const val SEAT_URL = "https://api.github.com/copilot_internal/v2/token"
+
         /** Ids that answer a /models call but cannot hold a conversation. */
         val NOT_CHAT = listOf("embed", "whisper", "tts", "dall-e", "moderation", "rerank", "audio", "image")
     }

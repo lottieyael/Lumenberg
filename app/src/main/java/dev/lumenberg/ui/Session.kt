@@ -8,6 +8,9 @@ import androidx.compose.runtime.setValue
 import dev.lumenberg.ai.Account
 import dev.lumenberg.ai.AccountStore
 import dev.lumenberg.ai.AiClient
+import dev.lumenberg.ai.DeviceCode
+import dev.lumenberg.ai.GitHubAuth
+import dev.lumenberg.ai.Provider
 import dev.lumenberg.ai.Turn
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -130,6 +133,24 @@ class Session(context: Context, private val scope: CoroutineScope) {
                 }
             }
         }
+    }
+
+    /**
+     * Runs GitHub's device flow to the end and keeps the account. Returns null on success
+     * or a sentence to show; [onCode] fires as soon as there is a code to display.
+     */
+    suspend fun signInWithGitHub(onCode: (DeviceCode) -> Unit): String? {
+        val auth = GitHubAuth()
+        if (!auth.configured) {
+            return "This build has no GitHub client id compiled in, so Copilot sign-in is off. " +
+                "See the README."
+        }
+        val code = runCatching { auth.start() }
+            .getOrElse { return it.message ?: "Could not reach GitHub." }
+        onCode(code)
+        val token = runCatching { auth.awaitToken(code) }
+            .getOrElse { return it.message ?: "That sign-in did not complete." }
+        return connect(Account(provider = Provider.COPILOT, credential = token))
     }
 
     /** Surfaces a message in the same place replies appear. */
