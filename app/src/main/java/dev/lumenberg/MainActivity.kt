@@ -5,123 +5,349 @@ import android.app.role.RoleManager
 import android.appwidget.AppWidgetHost
 import android.appwidget.AppWidgetManager
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.speech.RecognizerIntent
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import dev.lumenberg.ai.AiSettings
-import dev.lumenberg.ai.AiSettingsStore
-import dev.lumenberg.ui.HomeScreen
+import androidx.lifecycle.lifecycleScope
+import dev.lumenberg.ai.Account
+import dev.lumenberg.ai.OpenRouterAuth
+import dev.lumenberg.ai.Provider
+import dev.lumenberg.core.AppRepository
+import dev.lumenberg.ui.Connect
+import dev.lumenberg.ui.Home
 import dev.lumenberg.ui.LumenbergTheme
+import dev.lumenberg.ui.Motion
+import dev.lumenberg.ui.Onboarding
+import dev.lumenberg.ui.Picker
+import dev.lumenberg.ui.Session
+import dev.lumenberg.ui.Settings as SettingsPane
+import dev.lumenberg.ui.Sheet
+import dev.lumenberg.widgets.Offer
+import dev.lumenberg.widgets.Panel
 import dev.lumenberg.widgets.WidgetStore
+import kotlinx.coroutines.launch
+
+private enum class Overlay { None, Onboarding, Connect, Settings, Widgets }
 
 class MainActivity : ComponentActivity() {
-    private lateinit var appWidgetHost: AppWidgetHost
-    private lateinit var widgetStore: WidgetStore
-    private lateinit var aiStore: AiSettingsStore
+    private lateinit var host: AppWidgetHost
+    private lateinit var widgets: WidgetStore
+    private lateinit var repository: AppRepository
+    private lateinit var session: Session
+    private lateinit var auth: OpenRouterAuth
+    private val prefs by lazy { getSharedPreferences("launcher", MODE_PRIVATE) }
 
-    private var widgetIds by mutableStateOf(emptyList<Int>())
-    private var aiSettings by mutableStateOf(AiSettings("", "", ""))
+    private var panels by mutableStateOf(emptyList<Panel>())
     private var homeRoleHeld by mutableStateOf(false)
-    private var onboardingDone by mutableStateOf(false)
-    private var voiceText by mutableStateOf<String?>(null)
-    private var pendingWidgetId: Int? = null
+    private var voice by mutableStateOf<String?>(null)
+    private var overlay by mutableStateOf(Overlay.None)
+    private var step by mutableIntStateOf(0)
+    private var dynamicColour by mutableStateOf(true)
+    private var signingIn by mutableStateOf(false)
+    private var signInError by mutableStateOf<String?>(null)
+    private var connectFrom = Overlay.Settings
+    private var pendingWidget: Int? = null
 
-    private val widgetPicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        val id = result.data?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1)
-            ?.takeIf { it >= 0 }
-            ?: pendingWidgetId
-        if (result.resultCode == Activity.RESULT_OK && id != null) {
-            configureWidgetIfNeeded(id)
-        } else if (id != null) {
-            appWidgetHost.deleteAppWidgetId(id)
-        }
-        pendingWidgetId = null
+    private val bindWidget = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val id = result.idExtra() ?: pendingWidget
+        if (result.resultCode == Activity.RESULT_OK && id != null) configureOrKeep(id) else discard(id)
     }
 
-    private val widgetConfigure = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        val id = pendingWidgetId
-        if (id != null) {
-            if (result.resultCode == Activity.RESULT_OK) {
-                persistWidget(id)
-            } else {
-                appWidgetHost.deleteAppWidgetId(id)
-            }
-        }
-        pendingWidgetId = null
+    private val configureWidget = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val id = result.idExtra() ?: pendingWidget
+        if (result.resultCode == Activity.RESULT_OK && id != null) keep(id) else discard(id)
     }
 
-    private val voiceRecognizer = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+    /**
+     * The result intent carries the id, and reading it there is what survives the launcher
+     * being killed while a widget's configuration screen is in front.
+     */
+    private fun androidx.activity.result.ActivityResult.idExtra(): Int? =
+        data?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
+            ?.takeIf { it != AppWidgetManager.INVALID_APPWIDGET_ID }
+
+    private val listen = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode != Activity.RESULT_OK) return@registerForActivityResult
-        voiceText = result.data
-            ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-            ?.firstOrNull()
+        voice = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        appWidgetHost = AppWidgetHost(this, APP_WIDGET_HOST_ID)
-        widgetStore = WidgetStore(this)
-        aiStore = AiSettingsStore(this)
-        widgetIds = widgetStore.load()
-        aiSettings = aiStore.load()
-        onboardingDone = getSharedPreferences("onboarding", MODE_PRIVATE)
-            .getBoolean("done", false)
+        host = AppWidgetHost(this, HOST_ID)
+        widgets = WidgetStore(this)
+        repository = AppRepository(this, lifecycleScope)
+        session = Session(this, lifecycleScope)
+        auth = OpenRouterAuth(this)
+
+        dynamicColour = prefs.getBoolean("dynamic", true)
+        overlay = if (prefs.getBoolean("onboarded", false)) Overlay.None else Overlay.Onboarding
+        reloadPanels()
         refreshHomeRole()
+        handleAuthRedirect(intent)
 
         setContent {
-            LumenbergTheme {
-                HomeScreen(
-                    appWidgetHost = appWidgetHost,
-                    widgetIds = widgetIds,
-                    aiSettings = aiSettings,
+            LumenbergTheme(dynamic = dynamicColour) {
+                val apps by repository.apps.collectAsState()
+
+                Home(
+                    repository = repository,
+                    session = session,
+                    host = host,
+                    panels = panels,
+                    apps = apps,
+                    // Back belongs to whatever is on top; the home screen must not steal it.
+                    enabled = overlay == Overlay.None,
                     homeRoleHeld = homeRoleHeld,
-                    onboardingDone = onboardingDone,
-                    voiceText = voiceText,
-                    onVoiceConsumed = { voiceText = null },
-                    onRequestHomeRole = ::requestHomeRole,
-                    onAddWidget = ::pickWidget,
+                    voice = voice,
+                    onVoiceUsed = { voice = null },
+                    onStartVoice = ::startListening,
+                    onSettings = { overlay = Overlay.Settings },
+                    onConnect = ::openConnect,
+                    onAddWidget = ::addWidget,
                     onRemoveWidget = ::removeWidget,
-                    onStartVoice = ::startVoiceRecognition,
-                    onSaveAiSettings = ::saveAiSettings,
-                    onFinishOnboarding = ::finishOnboarding,
+                    onResizeWidget = { id, height -> widgets.resize(id, height); reloadPanels() },
+                    onMoveWidget = { id, by -> widgets.move(id, by); reloadPanels() },
+                    onRequestHome = ::requestHomeRole,
                 )
+
+                // Keep showing the sheet that is leaving, or every close flashes onboarding.
+                var showing by remember { mutableStateOf(overlay) }
+                LaunchedEffect(overlay) { if (overlay != Overlay.None) showing = overlay }
+
+                AnimatedVisibility(
+                    visible = overlay != Overlay.None,
+                    enter = slideInVertically(Motion.Settle) { it / 4 } + fadeIn(Motion.Fade),
+                    exit = slideOutVertically(Motion.Settle) { it / 4 } + fadeOut(Motion.Fade),
+                ) {
+                    BackHandler(enabled = showing != Overlay.Onboarding) {
+                        overlay = if (showing == Overlay.Connect) connectFrom else Overlay.None
+                    }
+                    when (showing) {
+                        Overlay.Settings -> Sheet("Settings", onClose = { overlay = Overlay.None }) {
+                            SettingsPane(
+                                session = session,
+                                homeRoleHeld = homeRoleHeld,
+                                dynamicColour = dynamicColour,
+                                onDynamicColour = ::useDynamicColour,
+                                onRequestHome = ::requestHomeRole,
+                                onConnect = ::openConnect,
+                                onAddWidget = ::addWidget,
+                            )
+                        }
+                        Overlay.Widgets -> Sheet("Add a widget", onClose = { overlay = Overlay.None }) {
+                            Picker(onChoose = ::chooseWidget)
+                        }
+                        Overlay.Connect -> Sheet("Connect an assistant", onClose = { overlay = connectFrom }) {
+                            Connect(
+                                session = session,
+                                signingIn = signingIn,
+                                signInError = signInError,
+                                onOAuth = ::signInWithOpenRouter,
+                                onOpenUrl = ::openUrl,
+                                onDone = { overlay = Overlay.None },
+                            )
+                        }
+                        else -> Sheet("Lumenberg", onClose = null) {
+                            Onboarding(
+                                step = step,
+                                homeRoleHeld = homeRoleHeld,
+                                aiReady = session.ready,
+                                onRequestHome = ::requestHomeRole,
+                                onConnect = ::openConnect,
+                                onNext = { step++ },
+                                onSkip = ::finishOnboarding,
+                            )
+                        }
+                    }
+                }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleAuthRedirect(intent)
+        // Pressing Home while already here should feel like arriving, not like nothing happened.
+        if (intent.hasCategory(Intent.CATEGORY_HOME) && overlay != Overlay.Onboarding) {
+            overlay = Overlay.None
+            session.clear()
         }
     }
 
     override fun onStart() {
         super.onStart()
-        appWidgetHost.startListening()
+        host.startListening()
+        repository.start()
     }
 
     override fun onResume() {
         super.onResume()
         refreshHomeRole()
-        widgetIds = widgetStore.load()
+        reloadPanels()
     }
 
     override fun onStop() {
-        appWidgetHost.stopListening()
+        host.stopListening()
+        repository.stop()
         super.onStop()
+    }
+
+    // --- AI sign-in -------------------------------------------------------
+
+    /** Remembers where the user came from, so closing Connect goes back there. */
+    private fun openConnect() {
+        if (overlay != Overlay.Connect) connectFrom = overlay
+        overlay = Overlay.Connect
+    }
+
+    private fun signInWithOpenRouter() {
+        signInError = null
+        runCatching { startActivity(auth.authorizeIntent()) }
+            .onFailure { signInError = "No browser on this device could open the sign-in page." }
+    }
+
+    private fun handleAuthRedirect(intent: Intent?) {
+        val code = auth.codeIn(intent?.data) ?: return
+        setIntent(Intent(this, MainActivity::class.java))
+        overlay = Overlay.Connect
+        signingIn = true
+        lifecycleScope.launch {
+            signInError = runCatching { auth.exchange(code) }
+                .fold(
+                    onSuccess = { key ->
+                        session.connect(Account(provider = Provider.OPENROUTER, credential = key))
+                    },
+                    onFailure = { it.message ?: "That sign-in did not complete." },
+                )
+            signingIn = false
+            if (session.ready) {
+                finishOnboarding()
+                overlay = Overlay.None
+            }
+        }
+    }
+
+    private fun openUrl(url: String) {
+        runCatching {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+    }
+
+    // --- Widgets ----------------------------------------------------------
+
+    private fun addWidget() {
+        overlay = Overlay.Widgets
+    }
+
+    /**
+     * Binds a provider the user chose from Lumenberg's own catalogue. Binding usually
+     * succeeds outright; when the system wants explicit consent, it asks for it.
+     */
+    private fun chooseWidget(offer: Offer) {
+        overlay = Overlay.None
+        discard(pendingWidget)
+        val id = host.allocateAppWidgetId()
+        pendingWidget = id
+        val manager = AppWidgetManager.getInstance(this)
+        val bound = runCatching {
+            manager.bindAppWidgetIdIfAllowed(id, offer.provider.profile, offer.provider.provider, null)
+        }.getOrDefault(false)
+
+        if (bound) {
+            configureOrKeep(id)
+            return
+        }
+        val intent = Intent(AppWidgetManager.ACTION_APPWIDGET_BIND)
+            .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
+            .putExtra(AppWidgetManager.EXTRA_APPWIDGET_PROVIDER, offer.provider.provider)
+            .putExtra(AppWidgetManager.EXTRA_APPWIDGET_PROVIDER_PROFILE, offer.provider.profile)
+        runCatching { bindWidget.launch(intent) }.onFailure { discard(id) }
+    }
+
+    private fun configureOrKeep(id: Int) {
+        val configure = AppWidgetManager.getInstance(this).getAppWidgetInfo(id)?.configure
+        if (configure == null) {
+            keep(id)
+            return
+        }
+        pendingWidget = id
+        val intent = Intent(AppWidgetManager.ACTION_APPWIDGET_CONFIGURE)
+            .setComponent(configure)
+            .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
+        runCatching { configureWidget.launch(intent) }.onFailure {
+            // A configuration screen we cannot open should not cost the user the widget.
+            keep(id)
+        }
+    }
+
+    private fun keep(id: Int) {
+        val info = AppWidgetManager.getInstance(this).getAppWidgetInfo(id)
+        widgets.add(id, Panel.fitHeight(info?.minHeight ?: 0, resources.displayMetrics))
+        pendingWidget = null
+        // Deliberately no pruning here: the id may not be visible to our host yet.
+        panels = widgets.load()
+    }
+
+    private fun discard(id: Int?) {
+        id?.let { host.deleteAppWidgetId(it) }
+        pendingWidget = null
+    }
+
+    private fun removeWidget(id: Int) {
+        widgets.remove(id)
+        host.deleteAppWidgetId(id)
+        reloadPanels()
+    }
+
+    /**
+     * Drops widget ids the system has forgotten, so dead cards cannot accumulate.
+     * An empty answer is treated as "ask again later", never as "delete everything":
+     * losing a screen of widgets to a transient system state is unforgivable.
+     */
+    private fun reloadPanels() {
+        val live = runCatching { host.appWidgetIds.toSet() }.getOrDefault(emptySet())
+        if (live.isNotEmpty()) widgets.retain(live)
+        panels = widgets.load()
+    }
+
+    // --- Odds and ends ----------------------------------------------------
+
+    private fun startListening() {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            .putExtra(RecognizerIntent.EXTRA_PROMPT, "Ask or launch")
+        runCatching { listen.launch(intent) }
+            .onFailure { voice = null; session.report("This phone has no voice input installed.") }
     }
 
     private fun refreshHomeRole() {
         homeRoleHeld = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val manager = getSystemService(RoleManager::class.java)
-            manager?.isRoleHeld(RoleManager.ROLE_HOME) == true
+            getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_HOME) == true
         } else {
-            val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
-            packageManager.resolveActivity(homeIntent, 0)?.activityInfo?.packageName == packageName
+            val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+            packageManager.resolveActivity(home, 0)?.activityInfo?.packageName == packageName
         }
     }
 
@@ -129,81 +355,24 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val manager = getSystemService(RoleManager::class.java) ?: return
             if (manager.isRoleAvailable(RoleManager.ROLE_HOME) && !manager.isRoleHeld(RoleManager.ROLE_HOME)) {
-                startActivity(manager.createRequestRoleIntent(RoleManager.ROLE_HOME))
+                runCatching { startActivity(manager.createRequestRoleIntent(RoleManager.ROLE_HOME)) }
+                return
             }
-        } else {
-            startActivity(Intent(Settings.ACTION_HOME_SETTINGS))
         }
+        runCatching { startActivity(Intent(Settings.ACTION_HOME_SETTINGS)) }
     }
 
-    private fun pickWidget() {
-        val id = appWidgetHost.allocateAppWidgetId()
-        pendingWidgetId = id
-        val intent = Intent(AppWidgetManager.ACTION_APPWIDGET_PICK).apply {
-            putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
-        }
-        runCatching { widgetPicker.launch(intent) }
-            .onFailure {
-                appWidgetHost.deleteAppWidgetId(id)
-                pendingWidgetId = null
-            }
-    }
-
-    private fun configureWidgetIfNeeded(id: Int) {
-        val manager = AppWidgetManager.getInstance(this)
-        val info = manager.getAppWidgetInfo(id)
-        val configure = info?.configure
-        if (configure == null) {
-            persistWidget(id)
-            pendingWidgetId = null
-            return
-        }
-
-        pendingWidgetId = id
-        val intent = Intent(AppWidgetManager.ACTION_APPWIDGET_CONFIGURE).apply {
-            component = configure
-            putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
-        }
-        runCatching { widgetConfigure.launch(intent) }
-            .onFailure {
-                appWidgetHost.deleteAppWidgetId(id)
-                pendingWidgetId = null
-            }
-    }
-
-    private fun persistWidget(id: Int) {
-        widgetStore.add(id)
-        widgetIds = widgetStore.load()
-    }
-
-    private fun removeWidget(id: Int) {
-        widgetStore.remove(id)
-        appWidgetHost.deleteAppWidgetId(id)
-        widgetIds = widgetStore.load()
-    }
-
-    private fun startVoiceRecognition() {
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_PROMPT, "Ask or launch")
-        }
-        runCatching { voiceRecognizer.launch(intent) }
-    }
-
-    private fun saveAiSettings(settings: AiSettings) {
-        aiStore.save(settings)
-        aiSettings = settings
+    private fun useDynamicColour(on: Boolean) {
+        dynamicColour = on
+        prefs.edit().putBoolean("dynamic", on).apply()
     }
 
     private fun finishOnboarding() {
-        getSharedPreferences("onboarding", MODE_PRIVATE)
-            .edit()
-            .putBoolean("done", true)
-            .apply()
-        onboardingDone = true
+        prefs.edit().putBoolean("onboarded", true).apply()
+        overlay = Overlay.None
     }
 
-    companion object {
-        private const val APP_WIDGET_HOST_ID = 0x0A11
+    private companion object {
+        const val HOST_ID = 0x0A11
     }
 }

@@ -1,15 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!--
+      A launcher window: draws the user's wallpaper, owns the whole screen, and is opaque
+      to the system so it is not composited as an overlay every frame.
+    -->
     <style name="Theme.Lumenberg" parent="android:style/Theme.Material.NoActionBar">
-        <item name="android:fontFamily">sans</item>
-        <item name="android:windowActionModeOverlay">true</item>
-        <item name="android:windowNoTitle">true</item>
         <item name="android:windowShowWallpaper">true</item>
-        <item name="android:windowIsTranslucent">true</item>
-        <item name="android:colorAccent">@android:color/white</item>
+        <!-- Without this, View-based widget content draws opaque scroll-cache bands
+             over the wallpaper while flinging. -->
+        <item name="android:colorBackgroundCacheHint">@null</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowDisablePreview">true</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
-        <item name="android:windowLightStatusBar">false</item>
-        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
     </style>
 </resources>
