@@ -1,0 +1,160 @@
+package dev.lumenberg.ui
+
+import android.content.Context
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import dev.lumenberg.ai.Account
+import dev.lumenberg.ai.AccountStore
+import dev.lumenberg.ai.AiClient
+import dev.lumenberg.ai.Turn
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+/**
+ * Everything the assistant needs to exist: the account, the conversation, the in-flight request.
+ * Lives as long as the launcher process so a stray recomposition never drops a reply.
+ */
+class Session(context: Context, private val scope: CoroutineScope) {
+    private val store = AccountStore(context)
+    private val client = AiClient()
+
+    var account by mutableStateOf(store.load())
+        private set
+    var models by mutableStateOf(emptyList<String>())
+        private set
+
+    val turns = mutableStateListOf<Turn>()
+    var streaming by mutableStateOf<String?>(null)
+        private set
+    var error by mutableStateOf<String?>(null)
+        private set
+
+    private var job: Job? = null
+
+    val busy: Boolean get() = streaming != null
+    val ready: Boolean get() = account.ready
+    val active: Boolean get() = turns.isNotEmpty() || busy || error != null
+
+    /**
+     * Verifies a candidate account by listing its models, then keeps it.
+     * Returns null on success or a sentence to show the user.
+     */
+    suspend fun connect(candidate: Account): String? {
+        val found = runCatching { client.models(candidate) }
+            .getOrElse { return it.message ?: "Could not reach ${candidate.provider.label}." }
+        if (found.isEmpty()) return "${candidate.provider.label} did not offer any models for this account."
+        val chosen = candidate.model.takeIf { it in found }
+            ?: client.preferred(candidate.provider, found)
+            ?: found.first()
+        val next = candidate.copy(model = chosen)
+        runCatching { store.save(next) }.onFailure { return it.message ?: "Could not save that sign-in." }
+        models = found
+        account = next
+        return null
+    }
+
+    fun useModel(model: String) {
+        val next = account.copy(model = model)
+        if (runCatching { store.save(next) }.isSuccess) account = next
+    }
+
+    /** Refreshes the model list for the saved account, e.g. when opening Settings. */
+    fun loadModels() {
+        if (!account.ready) return
+        scope.launch { models = runCatching { client.models(account) }.getOrDefault(models) }
+    }
+
+    fun signOut() {
+        stop()
+        clear()
+        store.clear()
+        account = Account()
+        models = emptyList()
+    }
+
+    /**
+     * [onOpen] is asked to launch an app by name and answers whether it managed to.
+     */
+    fun ask(text: String, apps: List<String>, onOpen: (String) -> Boolean) {
+        if (text.isBlank() || busy) return
+        error = null
+        turns += Turn("user", text)
+        trim()
+        streaming = ""
+        val history = turns.toList()
+        job = scope.launch {
+            val sink = StringBuilder()
+            var lastPush = 0L
+            runCatching {
+                client.send(account, history, apps) { token ->
+                    sink.append(token)
+                    // One state write per token would be one recomposition per token.
+                    // Pushing on a frame budget keeps the text alive and the list still.
+                    val now = System.currentTimeMillis()
+                    if (now - lastPush >= 50) {
+                        lastPush = now
+                        val snapshot = sink.toString()
+                        withContext(Dispatchers.Main) { streaming = snapshot }
+                    }
+                }
+            }.onSuccess { reply ->
+                withContext(Dispatchers.Main) {
+                    streaming = null
+                    when {
+                        reply.open != null && onOpen(reply.open) ->
+                            turns += Turn("assistant", "Opening ${reply.open}.")
+                        reply.open != null ->
+                            error = "There is no app here called \"${reply.open}\"."
+                        reply.text.isNotBlank() -> turns += Turn("assistant", reply.text)
+                        else -> error = "The assistant returned an empty reply."
+                    }
+                }
+            }.onFailure { failure ->
+                // This coroutine may already be cancelled, and the cleanup still has to run.
+                withContext(NonCancellable + Dispatchers.Main) {
+                    // A stopped reply is still worth keeping; the user watched it arrive.
+                    val partial = sink.toString().trim()
+                    streaming = null
+                    if (failure is CancellationException) {
+                        if (partial.isNotEmpty()) turns += Turn("assistant", partial)
+                    } else {
+                        error = failure.message ?: "That request did not go through."
+                    }
+                }
+            }
+        }
+    }
+
+    /** Surfaces a message in the same place replies appear. */
+    fun report(message: String) {
+        error = message
+    }
+
+    fun stop() {
+        job?.cancel()
+        job = null
+        streaming = null
+    }
+
+    fun clear() {
+        stop()
+        turns.clear()
+        error = null
+    }
+
+    /**
+     * Keeps the context small and well-formed: recent turns only, always starting on a
+     * user turn, because Anthropic rejects histories that do not.
+     */
+    private fun trim(keep: Int = 12) {
+        while (turns.size > keep) turns.removeAt(0)
+        while (turns.isNotEmpty() && turns.first().role != "user") turns.removeAt(0)
+    }
+}
