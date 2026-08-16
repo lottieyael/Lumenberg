@@ -77,6 +77,7 @@ enum class Provider(
     /** Where a user goes to get a key, when a key is the only option. */
     val keyUrl: String?
         get() = when (this) {
+            OPENROUTER -> "https://openrouter.ai/keys"
             OPENAI -> "https://platform.openai.com/api-keys"
             ANTHROPIC -> "https://console.anthropic.com/settings/keys"
             GOOGLE -> "https://aistudio.google.com/apikey"

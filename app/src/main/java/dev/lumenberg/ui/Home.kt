@@ -68,6 +68,7 @@ import androidx.core.content.ContextCompat
 import dev.lumenberg.core.AppRepository
 import dev.lumenberg.core.LauncherApp
 import dev.lumenberg.widgets.Panel
+import android.text.format.DateFormat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -269,18 +270,17 @@ fun Home(
 }
 
 /**
- * Follows the system's own minute tick, so the date is right after midnight without the
- * launcher waking up on a timer of its own.
+ * Follows the system's own minute tick, so the clock is right without the launcher
+ * waking up on a timer of its own, and the date is right after midnight.
  */
 @Composable
-private fun rememberClock(pattern: String): String {
+private fun rememberMinute(): Date {
     val context = LocalContext.current
-    val format = remember(pattern) { SimpleDateFormat(pattern, Locale.getDefault()) }
-    var text by remember { mutableStateOf(format.format(Date())) }
-    DisposableEffect(format) {
+    var now by remember { mutableStateOf(Date()) }
+    DisposableEffect(context) {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(c: Context?, i: Intent?) {
-                text = format.format(Date())
+                now = Date()
             }
         }
         val filter = IntentFilter().apply {
@@ -291,7 +291,7 @@ private fun rememberClock(pattern: String): String {
         ContextCompat.registerReceiver(context, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
         onDispose { runCatching { context.unregisterReceiver(receiver) } }
     }
-    return text
+    return now
 }
 
 /** Date and the two controls that are not the command bar. */
@@ -302,23 +302,56 @@ private fun Crown(
     onAddWidget: () -> Unit,
     onDoneEditing: () -> Unit,
 ) {
-    val today = rememberClock("EEEE d MMMM")
+    val context = LocalContext.current
+    val header = LocalHeader.current
+    val minute = rememberMinute()
+    val clock = remember(minute, header) {
+        if (header.showsClock) {
+            val pattern = if (DateFormat.is24HourFormat(context)) "HH:mm" else "h:mm a"
+            SimpleDateFormat(pattern, Locale.getDefault()).format(minute)
+        } else {
+            null
+        }
+    }
+    val date = remember(minute, header) {
+        if (header.showsDate) {
+            SimpleDateFormat("EEEE d MMMM", Locale.getDefault()).format(minute)
+        } else {
+            null
+        }
+    }
+
     // Everything Lumenberg draws sits on a card. Text straight on a wallpaper is a
     // contrast bug waiting for someone's photo, and no shadow reliably fixes it.
     Card(Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 10.dp)) {
         Row(
-            Modifier.padding(start = 18.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+            Modifier.padding(
+                start = if (clock == null && date == null && !editing) 6.dp else 18.dp,
+                end = 6.dp,
+                top = 6.dp,
+                bottom = 6.dp,
+            ),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.End,
         ) {
             Column(Modifier.weight(1f)) {
-                Text(
-                    today,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                if (editing) {
+                // The larger line is whichever of the two the user kept.
+                (clock ?: date)?.let { lead ->
                     Text(
+                        lead,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                val trail = if (clock != null) date else null
+                when {
+                    editing -> Text(
                         "Arranging widgets",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    trail != null -> Text(
+                        trail,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

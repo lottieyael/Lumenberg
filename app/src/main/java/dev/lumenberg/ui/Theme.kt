@@ -26,12 +26,14 @@ data class Look(
     val appearance: Appearance = Appearance.System,
     val accent: Accent = Accent.Wallpaper,
     val surface: Surfaces = Surfaces.Soft,
+    val header: Header = Header.Both,
 ) {
     fun save(context: Context) = context
         .getSharedPreferences("look", Context.MODE_PRIVATE).edit()
         .putString("appearance", appearance.name)
         .putString("accent", accent.name)
         .putString("surface", surface.name)
+        .putString("header", header.name)
         .apply()
 
     companion object {
@@ -43,12 +45,28 @@ data class Look(
                 appearance = read("appearance", Appearance.entries, Appearance.System),
                 accent = read("accent", Accent.entries, Accent.Wallpaper),
                 surface = read("surface", Surfaces.entries, Surfaces.Soft),
+                header = read("header", Header.entries, Header.Both),
             )
         }
     }
 }
 
 enum class Appearance(val label: String) { System("System"), Light("Light"), Dark("Dark") }
+
+/** What the bar across the top of the home screen shows. */
+enum class Header(val label: String) {
+    Both("Time and date"),
+    Clock("Time"),
+    Date("Date"),
+    None("Nothing"),
+    ;
+
+    val showsClock: Boolean get() = this == Both || this == Clock
+    val showsDate: Boolean get() = this == Both || this == Date
+}
+
+/** What the top bar shows, read where it is drawn. */
+val LocalHeader = staticCompositionLocalOf { Header.Both }
 
 /**
  * Wallpaper colours where the platform offers them, otherwise a pair per accent: a deep
@@ -101,6 +119,7 @@ fun LumenbergTheme(look: Look = Look(), content: @Composable () -> Unit) {
     CompositionLocalProvider(
         LocalSurfaceAlpha provides look.surface.alpha,
         LocalSurfaceStyle provides look.surface,
+        LocalHeader provides look.header,
     ) {
         MaterialTheme(colorScheme = colors, content = content)
     }

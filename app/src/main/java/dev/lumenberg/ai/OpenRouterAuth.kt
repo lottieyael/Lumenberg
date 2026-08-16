@@ -24,10 +24,12 @@ class OpenRouterAuth(context: Context) {
 
     fun authorizeIntent(): Intent {
         val verifier = random()
-        val state = random()
-        prefs.edit().putString("verifier", verifier).putString("state", state).apply()
+        prefs.edit().putString("verifier", verifier).apply()
+        // The callback carries no query of its own. It used to carry a state parameter,
+        // which meant the provider appended its code after a second "?" and the redirect
+        // came back unparseable, so the sign-in silently never finished.
         val url = Uri.parse("https://openrouter.ai/auth").buildUpon()
-            .appendQueryParameter("callback_url", "$REDIRECT?state=$state")
+            .appendQueryParameter("callback_url", REDIRECT)
             .appendQueryParameter("code_challenge", challenge(verifier))
             .appendQueryParameter("code_challenge_method", "S256")
             .build()
@@ -35,13 +37,13 @@ class OpenRouterAuth(context: Context) {
     }
 
     /**
-     * The redirect is a BROWSABLE deep link, so any web page can fire it. Only a callback
-     * carrying the state we minted for this attempt is treated as ours.
+     * The redirect is a BROWSABLE deep link, so any web page can fire it. A code is only
+     * taken seriously while we are actually waiting for one, and PKCE does the rest: a
+     * code obtained by anyone else will not match the verifier held here.
      */
     fun codeIn(uri: Uri?): String? {
         if (uri == null || uri.scheme != "lumenberg" || uri.host != "auth") return null
-        val expected = prefs.getString("state", null) ?: return null
-        if (uri.getQueryParameter("state") != expected) return null
+        if (prefs.getString("verifier", null) == null) return null
         return uri.getQueryParameter("code")?.takeIf { it.isNotBlank() }
     }
 
@@ -71,7 +73,7 @@ class OpenRouterAuth(context: Context) {
         } finally {
             connection.disconnect()
             // The code is single-use either way; a stale verifier would only break the retry.
-            prefs.edit().remove("verifier").remove("state").apply()
+            prefs.edit().remove("verifier").apply()
         }
 
         JSONObject(text).optString("key").takeIf { it.isNotBlank() }

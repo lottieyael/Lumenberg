@@ -21,8 +21,9 @@ Lumenberg's own in-app catalogue rather than the system `ACTION_APPWIDGET_PICK` 
 is a bare list and crashes on some builds.
 
 **Appearance.** Light, dark or follow-system; a choice of accent colour including
-wallpaper-derived Material You; and four card backgrounds, from solid through to glass,
-which samples the wallpaper behind each card and blurs it.
+wallpaper-derived Material You; four card backgrounds, from solid through to glass, which
+samples the wallpaper behind each card and blurs it; and a top bar that can show the time,
+the date, both or neither.
 
 **Swipe navigation.** Optional, off by default. Swipe in from either side for Back, up from
 the bottom for Home, up and hold for Recents. This exists because MIUI and HyperOS switch
@@ -47,7 +48,7 @@ An assistant is optional. The launcher is fully usable without one.
 
 | Provider | Sign-in |
 |---|---|
-| OpenRouter | OAuth with PKCE in the browser. No API key is shown or typed. |
+| OpenRouter | OAuth with PKCE in the browser, or paste a key if the browser does not return. |
 | GitHub Copilot | GitHub OAuth device flow, using an existing Copilot seat. Requires a client id, see below. |
 | OpenAI, Anthropic, Google Gemini, DeepSeek | Paste an API key. Each option links to the provider's key page. |
 | Ollama / LM Studio | Type the machine's address on the local network. No credential. |
@@ -92,7 +93,7 @@ you press send. There is no analytics or telemetry.
 ## Install
 
 Download the APK from [Releases](../../releases), install it (`adb install
-Lumenberg-0.4.0.apk`), then press Home and select Lumenberg.
+Lumenberg-0.4.1.apk`), then press Home and select Lumenberg.
 
 ## Build
 

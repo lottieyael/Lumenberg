@@ -144,15 +144,17 @@ class AiClientTest {
     // --- provider wiring --------------------------------------------------
 
     @Test
-    fun `every provider that needs no key says so, and every key provider explains where`() {
+    fun `anywhere a key can be pasted, users are told where to get one`() {
         Provider.entries.forEach { provider ->
             when (provider.signIn) {
-                SignIn.KEY -> assertEquals(
+                // A browser sign-in can still fall back to a pasted key, so it needs the link too.
+                SignIn.KEY, SignIn.OAUTH -> assertEquals(
                     "${provider.label} must tell users where to get a key",
                     true,
                     provider.keyUrl != null,
                 )
-                else -> assertNull(provider.keyUrl)
+                // Nothing to paste: a device flow shows a code, and a local machine has no key.
+                SignIn.DEVICE, SignIn.HOST -> assertNull(provider.keyUrl)
             }
         }
     }

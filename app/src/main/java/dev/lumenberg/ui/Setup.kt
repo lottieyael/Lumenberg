@@ -172,10 +172,7 @@ fun Connect(
                     failure = null
                     secret = ""
                     device = null
-                    when (entry.signIn) {
-                        SignIn.OAUTH -> onOAuth()
-                        else -> chosen = entry
-                    }
+                    chosen = entry
                 },
             ) {
                 Row(
@@ -217,6 +214,16 @@ fun Connect(
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+
+    if (provider.signIn == SignIn.OAUTH) {
+        Text(
+            "Signing in through the browser means you never handle a key. If the browser " +
+                "does not bring you back, paste a key instead.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Button(onClick = onOAuth, enabled = !busy) { Text("Sign in with browser") }
+    }
 
     if (provider.signIn == SignIn.DEVICE) {
         val code = device
@@ -281,7 +288,15 @@ fun Connect(
         modifier = Modifier.fillMaxWidth(),
         singleLine = true,
         enabled = !busy,
-        label = { Text(if (provider.signIn == SignIn.HOST) "Address of your machine" else "Key from ${provider.label}") },
+        label = {
+            Text(
+                when (provider.signIn) {
+                    SignIn.HOST -> "Address of your machine"
+                    SignIn.OAUTH -> "Or paste a key from ${provider.label}"
+                    else -> "Key from ${provider.label}"
+                },
+            )
+        },
         placeholder = { Text(if (provider.signIn == SignIn.HOST) "192.168.1.20" else "paste it here") },
         visualTransformation = if (provider.signIn == SignIn.HOST) {
             androidx.compose.ui.text.input.VisualTransformation.None
@@ -455,6 +470,13 @@ fun Settings(
                 name = { it.label },
                 swatch = { if (it == Accent.Wallpaper) null else it.onDark },
                 onSelect = { onLook(look.copy(accent = it)) },
+            )
+            Choice(
+                label = "Top bar",
+                options = Header.entries,
+                selected = look.header,
+                name = { it.label },
+                onSelect = { onLook(look.copy(header = it)) },
             )
             Choice(
                 label = "Card background",
