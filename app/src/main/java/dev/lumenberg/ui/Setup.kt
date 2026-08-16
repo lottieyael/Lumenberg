@@ -184,9 +184,10 @@ fun Connect(
             }
         }
         Text(
-            "Lumenberg cannot use a ChatGPT Plus, Claude Pro or Gemini Advanced subscription: " +
-                "those plans do not authorise other apps. OpenRouter is the closest thing to " +
-                "signing in, and it bills one account across every model.",
+            "A ChatGPT Plus or Claude Pro plan will not work here. Those sign-ins exist, but " +
+                "they only cover each company's own apps: Anthropic's terms now forbid using " +
+                "them anywhere else, and OpenAI's works only inside Codex. OpenRouter is the " +
+                "closest honest equivalent, and it bills one account across every model.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

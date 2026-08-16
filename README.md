@@ -34,11 +34,17 @@ Lumenberg is a complete launcher without one. If you want one:
 Once connected, Lumenberg asks the provider which models the account can use and picks a
 sensible one. You never type a URL, a model id, or a path.
 
-**A ChatGPT Plus, Claude Pro or Gemini Advanced subscription will not work here**, and no
-third-party launcher can make it work: those consumer plans do not authorise other
-applications, and there is no API to ask them to. Anything claiming otherwise is scraping
-session cookies, which breaks weekly and violates the terms you agreed to. OpenRouter is
-the closest honest equivalent — one account, one sign-in, every major model.
+**A ChatGPT Plus or Claude Pro subscription will not work here.** Subscription sign-in
+does exist — it is what backs OpenAI's Codex CLI and Anthropic's Claude Code — but both
+vendors have closed it to everyone else. Anthropic's terms have prohibited subscription
+OAuth tokens in third-party tools since February 2026 and it has been enforced since April,
+with account bans. OpenAI's credential is scoped to Codex; their own documentation points
+you at a Platform API key for anything else, and third-party clients reusing the Codex
+client id are refused at token exchange.
+
+So this is a licensing wall, not a technical one, and a launcher that climbed it would get
+its users banned. OpenRouter is the closest honest equivalent: one account, one sign-in,
+every major model.
 
 Keys are sealed with a hardware-backed AES-GCM key from the Android Keystore before they
 touch disk.
