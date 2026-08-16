@@ -32,6 +32,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
@@ -53,6 +54,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import dev.lumenberg.ai.Turn
@@ -78,15 +80,32 @@ fun CommandBar(
     val busy = session.busy
     val sendScale by animateFloatAsState(if (sendable || busy) 1f else 0.82f, Motion.Snap, label = "send")
 
+    val glass = LocalSurfaceStyle.current == Surfaces.Glass
+    val backdrop = rememberBackdrop(glass)
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(30.dp),
-        color = scheme.surfaceContainerHigh.copy(alpha = LocalSurfaceAlpha.current),
+        color = if (glass) {
+            androidx.compose.ui.graphics.Color.Transparent
+        } else {
+            scheme.surfaceContainerHigh.copy(alpha = LocalSurfaceAlpha.current)
+        },
         contentColor = scheme.onSurface,
         shadowElevation = 10.dp,
     ) {
         Row(
-            Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
+            Modifier
+                .then(
+                    if (glass) {
+                        Modifier.glass(
+                            backdrop,
+                            scheme.surfaceContainerHigh.copy(alpha = LocalSurfaceAlpha.current),
+                        )
+                    } else {
+                        Modifier
+                    },
+                )
+                .padding(horizontal = 6.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onApps) {
@@ -210,12 +229,27 @@ fun Thread(
                     .padding(start = 18.dp, end = 6.dp, top = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    "Assistant",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        session.account.provider.label,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (session.account.model.isNotBlank()) {
+                        Text(
+                            session.account.model,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                if (session.accounts.size > 1) {
+                    IconButton(onClick = session::cycle) {
+                        Icon(Icons.Rounded.SwapHoriz, contentDescription = "Use another assistant")
+                    }
+                }
                 IconButton(onClick = onClear) {
                     Icon(Icons.Rounded.Close, contentDescription = "Clear conversation")
                 }

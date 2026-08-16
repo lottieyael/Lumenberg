@@ -21,7 +21,8 @@ Lumenberg's own in-app catalogue rather than the system `ACTION_APPWIDGET_PICK` 
 is a bare list and crashes on some builds.
 
 **Appearance.** Light, dark or follow-system; a choice of accent colour including
-wallpaper-derived Material You; adjustable surface opacity for the cards over the wallpaper.
+wallpaper-derived Material You; and four card backgrounds, from solid through to glass,
+which samples the wallpaper behind each card and blurs it.
 
 ## Connecting an assistant
 
@@ -33,6 +34,10 @@ An assistant is optional. The launcher is fully usable without one.
 | GitHub Copilot | GitHub OAuth device flow, using an existing Copilot seat. Requires a client id, see below. |
 | OpenAI, Anthropic, Google Gemini, DeepSeek | Paste an API key. Each option links to the provider's key page. |
 | Ollama / LM Studio | Type the machine's address on the local network. No credential. |
+
+Several assistants can be connected at once. Settings lists them, tapping one makes it the
+assistant that answers, and the thread header has a swap control for switching mid
+conversation. Each keeps its own chosen model.
 
 After connecting, Lumenberg queries the provider's `/models` endpoint and picks a default.
 There is no URL or model id to type.
@@ -70,7 +75,7 @@ you press send. There is no analytics or telemetry.
 ## Install
 
 Download the APK from [Releases](../../releases), install it (`adb install
-Lumenberg-0.2.1.apk`), then press Home and select Lumenberg.
+Lumenberg-0.3.0.apk`), then press Home and select Lumenberg.
 
 ## Build
 

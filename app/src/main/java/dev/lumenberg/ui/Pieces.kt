@@ -21,6 +21,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -37,22 +38,30 @@ fun Card(
 ) {
     val scheme = MaterialTheme.colorScheme
     val alpha = LocalSurfaceAlpha.current
+    val glass = LocalSurfaceStyle.current == Surfaces.Glass && tone != Tone.Solid
+    val backdrop = rememberBackdrop(glass)
+    val fill = when (tone) {
+        Tone.Raised -> scheme.surfaceContainerHigh
+        // Panels that sit over other content stay opaque whatever the setting:
+        // a translucent app list on top of a translucent card is unreadable.
+        Tone.Solid -> scheme.surfaceContainerHigh
+        Tone.Accent -> scheme.primaryContainer
+    }
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(Motion.Radius),
-        color = when (tone) {
-            Tone.Raised -> scheme.surfaceContainerHigh.copy(alpha = alpha)
-            // Panels that sit over other content stay opaque whatever the setting:
-            // a translucent app list on top of a translucent card is unreadable.
-            Tone.Solid -> scheme.surfaceContainerHigh
-            Tone.Accent -> scheme.primaryContainer.copy(alpha = alpha)
-        },
+        color = if (glass) Color.Transparent else fill.copy(alpha = if (tone == Tone.Solid) 1f else alpha),
         // Surface infers its text colour from the exact scheme colour it was handed, and
         // copy(alpha) is no longer that colour, so it silently falls back to black. On a
         // dark card that is invisible text, which is what "dark mode looks weird" was.
         contentColor = if (tone == Tone.Accent) scheme.onPrimaryContainer else scheme.onSurface,
-        content = content,
-    )
+    ) {
+        if (glass) {
+            Box(Modifier.glass(backdrop, fill.copy(alpha = alpha))) { content() }
+        } else {
+            content()
+        }
+    }
 }
 
 enum class Tone { Raised, Solid, Accent }

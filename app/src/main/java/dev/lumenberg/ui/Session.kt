@@ -28,7 +28,10 @@ class Session(context: Context, private val scope: CoroutineScope) {
     private val store = AccountStore(context)
     private val client = AiClient()
 
-    var account by mutableStateOf(store.load())
+    /** Every connected account, in the order they were added. */
+    var accounts by mutableStateOf(store.load())
+        private set
+    var active by mutableStateOf(store.active())
         private set
     var models by mutableStateOf(emptyList<String>())
         private set
@@ -41,12 +44,16 @@ class Session(context: Context, private val scope: CoroutineScope) {
 
     private var job: Job? = null
 
+    /** The account currently answering. */
+    val account: Account get() = accounts.getOrNull(active) ?: Account()
+
     val busy: Boolean get() = streaming != null
     val ready: Boolean get() = account.ready
-    val active: Boolean get() = turns.isNotEmpty() || busy || error != null
+    val running: Boolean get() = turns.isNotEmpty() || busy || error != null
 
     /**
-     * Verifies a candidate account by listing its models, then keeps it.
+     * Verifies a candidate account by listing its models, then keeps it. Connecting a
+     * provider that is already connected replaces it rather than adding a duplicate.
      * Returns null on success or a sentence to show the user.
      */
     suspend fun connect(candidate: Account): String? {
@@ -57,29 +64,63 @@ class Session(context: Context, private val scope: CoroutineScope) {
             ?: client.preferred(candidate.provider, found)
             ?: found.first()
         val next = candidate.copy(model = chosen)
-        runCatching { store.save(next) }.onFailure { return it.message ?: "Could not save that sign-in." }
+
+        val existing = accounts.indexOfFirst { it.provider == next.provider }
+        val updated = if (existing >= 0) accounts.toMutableList().apply { set(existing, next) }
+        else accounts + next
+        val index = if (existing >= 0) existing else updated.lastIndex
+
+        runCatching { store.save(updated, index) }
+            .onFailure { return it.message ?: "Could not save that sign-in." }
+        accounts = updated
+        active = index
         models = found
-        account = next
         return null
     }
 
-    fun useModel(model: String) {
-        val next = account.copy(model = model)
-        if (runCatching { store.save(next) }.isSuccess) account = next
+    /** Switches which connected account answers the next question. */
+    fun use(index: Int) {
+        if (index !in accounts.indices || index == active) return
+        stop()
+        active = index
+        models = emptyList()
+        runCatching { store.save(accounts, index) }
+        loadModels()
     }
 
-    /** Refreshes the model list for the saved account, e.g. when opening Settings. */
+    /** Moves to the next connected account, for the swap control in the thread. */
+    fun cycle() {
+        if (accounts.size > 1) use((active + 1) % accounts.size)
+    }
+
+    fun useModel(model: String) {
+        val index = active
+        val updated = accounts.toMutableList()
+        if (index !in updated.indices) return
+        updated[index] = updated[index].copy(model = model)
+        if (runCatching { store.save(updated, index) }.isSuccess) accounts = updated
+    }
+
+    /** Refreshes the model list for the active account, e.g. when opening Settings. */
     fun loadModels() {
         if (!account.ready) return
-        scope.launch { models = runCatching { client.models(account) }.getOrDefault(models) }
+        val current = account
+        scope.launch {
+            val found = runCatching { client.models(current) }.getOrNull() ?: return@launch
+            if (account == current) models = found
+        }
     }
 
-    fun signOut() {
+    fun disconnect(index: Int) {
+        if (index !in accounts.indices) return
         stop()
-        clear()
-        store.clear()
-        account = Account()
+        val updated = accounts.toMutableList().apply { removeAt(index) }
+        val next = active.coerceAtMost(maxOf(updated.lastIndex, 0))
+        runCatching { store.save(updated, next) }
+        accounts = updated
+        active = next
         models = emptyList()
+        if (updated.isEmpty()) clear()
     }
 
     /**

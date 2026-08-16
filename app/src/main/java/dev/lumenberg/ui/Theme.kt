@@ -73,7 +73,13 @@ enum class Surfaces(val label: String, val alpha: Float) {
     Solid("Solid", 1f),
     Soft("Soft", 0.90f),
     Sheer("Sheer", 0.72f),
+
+    /** Frosted: the wallpaper behind the card, blurred, under a tint. */
+    Glass("Glass", 0.62f),
 }
+
+/** Which background treatment every card should use. */
+val LocalSurfaceStyle = staticCompositionLocalOf { Surfaces.Soft }
 
 /** Read by every card, so one setting reaches the whole screen. */
 val LocalSurfaceAlpha = staticCompositionLocalOf { Surfaces.Soft.alpha }
@@ -92,7 +98,10 @@ fun LumenbergTheme(look: Look = Look(), content: @Composable () -> Unit) {
         dark -> Ink.tinted(look.accent.onDark, dark = true)
         else -> Paper.tinted(look.accent.onLight, dark = false)
     }
-    CompositionLocalProvider(LocalSurfaceAlpha provides look.surface.alpha) {
+    CompositionLocalProvider(
+        LocalSurfaceAlpha provides look.surface.alpha,
+        LocalSurfaceStyle provides look.surface,
+    ) {
         MaterialTheme(colorScheme = colors, content = content)
     }
 }

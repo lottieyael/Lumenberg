@@ -25,6 +25,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Circle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material3.AssistChip
@@ -364,31 +365,66 @@ fun Settings(
     }
 
     Card {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (session.ready) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(10.dp))
-                    Labelled(
-                        session.account.provider.label,
-                        "Connected",
-                        Modifier.weight(1f),
-                    )
-                    TextButton(onClick = session::signOut) { Text("Sign out") }
-                }
-                Text("Model", style = MaterialTheme.typography.labelLarge)
-                if (session.models.isEmpty()) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (session.accounts.isEmpty()) {
+                Labelled("No assistant connected", "Lumenberg still launches apps without one.")
+                Button(onClick = onConnect) { Text("Connect an assistant") }
+            } else {
+                Text(
+                    "Assistants",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                if (session.accounts.size > 1) {
                     Text(
-                        session.account.model,
+                        "Tap one to make it the assistant that answers.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                } else {
-                    ModelPicker(session)
                 }
-            } else {
-                Labelled("No assistant connected", "Lumenberg still launches apps without one.")
-                Button(onClick = onConnect) { Text("Connect an assistant") }
+                session.accounts.forEachIndexed { index, account ->
+                    val current = index == session.active
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .clickable { session.use(index) }
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            if (current) Icons.Rounded.Check else Icons.Rounded.Circle,
+                            contentDescription = if (current) "Answering" else "Not in use",
+                            tint = if (current) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.outline
+                            },
+                            modifier = Modifier.size(if (current) 20.dp else 10.dp),
+                        )
+                        Spacer(Modifier.width(if (current) 10.dp else 20.dp))
+                        Labelled(
+                            account.provider.label,
+                            account.model.ifBlank { "No model chosen" },
+                            Modifier.weight(1f),
+                        )
+                        TextButton(onClick = { session.disconnect(index) }) { Text("Remove") }
+                    }
+                }
+                OutlinedButton(onClick = onConnect) { Text("Connect another") }
+
+                if (session.ready) {
+                    Text("Model", style = MaterialTheme.typography.labelLarge)
+                    if (session.models.isEmpty()) {
+                        Text(
+                            session.account.model,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        ModelPicker(session)
+                    }
+                }
             }
         }
     }

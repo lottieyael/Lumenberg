@@ -4,6 +4,8 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import org.json.JSONArray
+import org.json.JSONObject
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -39,33 +41,71 @@ class AccountStore(context: Context) {
     var unreadable: Boolean = false
         private set
 
-    fun load(): Account {
-        val stored = prefs.getString("credential", null)
-        val credential = stored?.let(::open)
-        unreadable = stored != null && credential == null
-        return Account(
-            provider = Provider.of(prefs.getString("provider", null)),
-            credential = credential.orEmpty(),
-            model = prefs.getString("model", "").orEmpty(),
-            host = prefs.getString("host", "").orEmpty(),
-        )
+    /**
+     * Every account the user has connected, and which one is answering. More than one is
+     * normal: a cheap model for quick questions and a strong one for real ones.
+     */
+    fun load(): List<Account> {
+        migrate()
+        val array = runCatching { JSONArray(prefs.getString("accounts", "[]")) }
+            .getOrDefault(JSONArray())
+        var lost = false
+        val accounts = (0 until array.length()).mapNotNull { i ->
+            val row = array.optJSONObject(i) ?: return@mapNotNull null
+            val sealed = row.optString("credential").takeIf { it.isNotBlank() }
+            val credential = sealed?.let(::open)
+            if (sealed != null && credential == null) lost = true
+            Account(
+                provider = Provider.of(row.optString("provider")),
+                credential = credential.orEmpty(),
+                model = row.optString("model"),
+                host = row.optString("host"),
+            )
+        }
+        unreadable = lost
+        return accounts
     }
 
+    fun active(): Int = prefs.getInt("active", 0)
+
     /**
-     * Throws rather than storing nothing: a Keystore hiccup during an unrelated save
-     * (changing model, say) must never quietly erase the user's credential.
+     * Throws rather than storing nothing: a Keystore hiccup while switching models must
+     * never quietly erase a credential.
      */
-    fun save(account: Account) {
-        val plain = account.credential.trim()
-        val sealed = if (plain.isEmpty()) null else seal(plain)
-            ?: throw AiError("This device would not store that key securely. Try again.")
-        val edit = prefs.edit()
-            .putString("provider", account.provider.id)
-            .putString("model", account.model.trim())
-            .putString("host", normalizeHost(account.host))
-        if (sealed != null) edit.putString("credential", sealed) else edit.remove("credential")
-        edit.apply()
+    fun save(accounts: List<Account>, active: Int) {
+        val array = JSONArray()
+        accounts.forEach { account ->
+            val plain = account.credential.trim()
+            val sealed = if (plain.isEmpty()) "" else seal(plain)
+                ?: throw AiError("This device would not store that key securely. Try again.")
+            array.put(
+                JSONObject()
+                    .put("provider", account.provider.id)
+                    .put("credential", sealed)
+                    .put("model", account.model.trim())
+                    .put("host", normalizeHost(account.host)),
+            )
+        }
+        prefs.edit()
+            .putString("accounts", array.toString())
+            .putInt("active", active.coerceIn(0, maxOf(accounts.lastIndex, 0)))
+            .apply()
         unreadable = false
+    }
+
+    /** Carries a 0.2 single-account install into the list format, once. */
+    private fun migrate() {
+        if (prefs.contains("accounts") || !prefs.contains("provider")) return
+        val row = JSONObject()
+            .put("provider", prefs.getString("provider", "").orEmpty())
+            .put("credential", prefs.getString("credential", "").orEmpty())
+            .put("model", prefs.getString("model", "").orEmpty())
+            .put("host", prefs.getString("host", "").orEmpty())
+        prefs.edit()
+            .putString("accounts", JSONArray().put(row).toString())
+            .putInt("active", 0)
+            .remove("provider").remove("credential").remove("model").remove("host")
+            .apply()
     }
 
     fun clear() = prefs.edit().clear().apply()

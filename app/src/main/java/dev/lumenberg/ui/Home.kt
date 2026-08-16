@@ -148,7 +148,7 @@ fun Home(
         }
     }
 
-    BackHandler(enabled = enabled && (searching || session.active || editing)) {
+    BackHandler(enabled = enabled && (searching || session.running || editing)) {
         when {
             editing -> editing = false
             searching -> { query = ""; drawer = false }
@@ -239,7 +239,7 @@ fun Home(
                 Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(Motion.Gap),
             ) {
-                Panel(visible = session.active && !searching) {
+                Panel(visible = session.running && !searching) {
                     Thread(session = session, onClear = session::clear)
                 }
                 Panel(visible = searching) {
