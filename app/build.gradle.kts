@@ -19,7 +19,13 @@ android {
 
     buildTypes {
         release {
-            // Debug-signed so CI release artifacts are installable out of the box.
+            // A launcher is resident for the life of the device. Shipping the whole of
+            // Compose unshrunk costs the user tens of megabytes for code never called.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+
+            // Debug-signed so release artifacts are installable out of the box.
             // Swap in your own signingConfig here before distributing.
             signingConfig = signingConfigs.getByName("debug")
         }

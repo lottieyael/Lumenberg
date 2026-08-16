@@ -96,9 +96,10 @@ Needs JDK 17 and an Android SDK with platform 37. The Gradle wrapper handles the
 
 The APK lands in `app/build/outputs/apk/debug/`.
 
-Release builds are signed with the debug key so they install without ceremony. Replace
-`signingConfig` in [app/build.gradle.kts](app/build.gradle.kts) before you distribute
-anything.
+Release builds run through R8 with resource shrinking, which is the difference between a
+2.4 MB launcher and a 44 MB one. They are signed with the debug key so they install
+without ceremony; replace `signingConfig` in [app/build.gradle.kts](app/build.gradle.kts)
+before you distribute anything of your own.
 
 ## Layout
 
