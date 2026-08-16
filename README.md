@@ -70,7 +70,7 @@ you press send. There is no analytics or telemetry.
 ## Install
 
 Download the APK from [Releases](../../releases), install it (`adb install
-Lumenberg-0.2.0.apk`), then press Home and select Lumenberg.
+Lumenberg-0.2.1.apk`), then press Home and select Lumenberg.
 
 ## Build
 
