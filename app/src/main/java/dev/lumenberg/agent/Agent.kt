@@ -39,6 +39,7 @@ sealed interface Outcome {
  */
 class Agent(
     private val client: AiClient,
+    private val tools: Tools,
     private val apps: () -> List<String>,
     private val launch: (String) -> Boolean,
 ) {
@@ -49,23 +50,26 @@ class Agent(
         onProgress: (String) -> Unit,
         onConfirm: suspend (String) -> Boolean,
     ): Outcome {
+        // A run no longer needs permission to touch the screen. Most requests are answered
+        // by the tools alone, in the background, and the screen verbs simply are not offered
+        // when the service is off.
         val service = AgentService.live
-            ?: return Outcome.Failed("Lumenberg is not allowed to use your apps yet.")
-
         val history = mutableListOf(Turn("user", "Task: $task"))
         var screen: Screen? = null
+        var pending: String? = null
         var malformed = 0
 
         repeat(MAX_STEPS) {
             // The first turn deliberately carries no screen. A question that needs no apps
             // is then answered in one cheap call, without walking an accessibility tree.
-            val observation = screen?.describe() ?: "The user is on the home screen."
+            val observation = pending ?: screen?.describe() ?: "Nothing has been looked at yet."
             val reply = runCatching {
                 client.converse(account, system(), history + Turn("user", observation))
             }.getOrElse { return Outcome.Failed(plain(it)) }
 
             history += Turn("user", observation)
             history += Turn("assistant", reply)
+            pending = null
 
             val step = parse(reply)
             if (step == null) {
@@ -79,12 +83,39 @@ class Agent(
             malformed = 0
 
             suspend fun observe() {
-                screen = withContext(Dispatchers.Default) { service.screen() }
+                val hands = service ?: return
+                screen = withContext(Dispatchers.Default) { hands.screen() }
             }
 
+            // Anything the tools can answer happens in the background, with no window and
+            // no permission, so it is tried first.
+            val answered = runCatching { tools.run(step.verb, step.json) }
+                .getOrElse { "That lookup failed." }
+            if (answered != null) {
+                onProgress(working(step.verb))
+                pending = answered
+                return@repeat
+            }
+
+            // Finishing needs no permission, so these are handled before the check below.
+            // Putting the check first meant a run with the phone's apps switched off could
+            // never end: "say" was swallowed and every step was spent on the same refusal.
             when (step.verb) {
                 "say" -> return Outcome.Said(step.str("text").ifBlank { "Done." })
                 "ask" -> return Outcome.Asked(step.str("text").ifBlank { "Which one?" })
+            }
+
+            val hands = service
+            if (hands == null) {
+                history += Turn(
+                    "user",
+                    "Using apps on the phone is switched off, so the lookups are all that is " +
+                        "available. Answer with what you have, using \"say\".",
+                )
+                return@repeat
+            }
+
+            when (step.verb) {
 
                 "open" -> {
                     val name = step.str("app")
@@ -104,11 +135,11 @@ class Agent(
                     }
                     // The label is read again at the moment of asking, so the question
                     // describes the button that is actually about to be pressed.
-                    val label = service.labelNow(element) ?: element.label
+                    val label = hands.labelNow(element) ?: element.label
                     if (Risk.consequential(label) && !onConfirm(Risk.describe(label))) {
                         return Outcome.Said("Left that alone.")
                     }
-                    when (val result = service.tap(element)) {
+                    when (val result = hands.tap(element)) {
                         is TapResult.Done -> Unit
                         is TapResult.Gone ->
                             history += Turn("user", "That control is no longer on the screen.")
@@ -124,7 +155,7 @@ class Agent(
 
                 "type" -> {
                     val element = (screen?.elements ?: emptyList()).getOrNull(step.int("ref"))
-                    if (element == null || !service.type(element, step.str("text"))) {
+                    if (element == null || !hands.type(element, step.str("text"))) {
                         history += Turn("user", "That field could not be typed into.")
                     }
                     delay(SHORT)
@@ -132,24 +163,24 @@ class Agent(
                 }
 
                 "enter" -> {
-                    if (!service.enter()) history += Turn("user", "There was nothing to submit.")
+                    if (!hands.enter()) history += Turn("user", "There was nothing to submit.")
                     delay(OPENING)
                     observe()
                 }
 
                 "scroll" -> {
-                    service.scroll(step.str("direction") != "up")
+                    hands.scroll(step.str("direction") != "up")
                     observe()
                 }
 
                 "back" -> {
-                    service.back()
+                    hands.back()
                     delay(SHORT)
                     observe()
                 }
 
                 "home" -> {
-                    service.home()
+                    hands.home()
                     delay(SHORT)
                     observe()
                 }
@@ -158,6 +189,16 @@ class Agent(
             }
         }
         return Outcome.Failed("That was taking too long, so I stopped.")
+    }
+
+    /** What the user is told is happening, in their words rather than the tool's. */
+    private fun working(verb: String): String = when (verb) {
+        "search" -> "Looking it up"
+        "place", "nearby" -> "Finding places"
+        "route" -> "Checking the route"
+        "weather" -> "Checking the weather"
+        "navigate" -> "Starting navigation"
+        else -> "Working"
     }
 
     /** Never shows the user a stack trace or a coroutine's internal name. */
@@ -176,31 +217,52 @@ class Agent(
 
     /** Byte-identical between steps and between runs, so it can sit in a cached prefix. */
     private fun system(): String = """
-        You operate an Android phone on the user's behalf. Each turn you are shown the
-        current screen and you reply with exactly one JSON object and nothing else. No
-        explanation, no markdown, no code fences.
+        You carry out requests for the user of an Android phone. Each turn you reply with
+        exactly one JSON object and nothing else. No explanation, no markdown, no fences.
 
-        {"do":"open","app":"Maps"}          launch an app by name
-        {"do":"tap","ref":3}                press control [3] on the screen shown
-        {"do":"type","ref":5,"text":"..."}  type into field [5]
-        {"do":"enter"}                      press the keyboard's go or search key
-        {"do":"scroll","direction":"down"}  scroll the screen
-        {"do":"back"}                       go back
-        {"do":"home"}                       go to the home screen
-        {"do":"ask","text":"..."}           ask the user one short question
-        {"do":"say","text":"..."}           finish, with the answer for the user
+        These happen quietly in the background. Prefer them:
+        {"do":"search","q":"..."}                    look something up
+        {"do":"place","q":"..."}                     find where somewhere is
+        {"do":"nearby","what":"cafe","near":"..."}   find things near a place
+        {"do":"route","from":"...","to":"...","mode":"driving|walking|cycling"}
+        {"do":"weather","place":"..."}               current weather and today's range
+        {"do":"navigate","to":"..."}                 start turn by turn navigation
 
-        Only refer to control numbers from the screen you were just shown; numbers from
-        earlier screens now mean different things. After typing into a search field you
-        usually need "enter". If a screen does not show what you need, scroll before
-        deciding it is not there.
-        Prefer the smallest number of steps. If the task is a question you can answer
-        without touching anything, answer it immediately with "say".
-        When you finish, "say" should read like a person answering, not a report of what
-        you did. Do not mention screens, steps, taps or tools.
+        Finishing:
+        {"do":"ask","text":"..."}                    ask the user one short question
+        {"do":"say","text":"..."}                    finish, with the answer for the user
+
+        ${handsPrompt()}
+
+        Answer from the background tools whenever they can do it. Only use the phone's apps
+        when the request genuinely needs one, for example sending a message or reading
+        something that exists only inside an app: opening an app puts it in front of the
+        user and interrupts them.
+
+        You may use several tools in a row before answering. When you finish, "say" should
+        read like a person answering, not a report of what you did. Do not mention screens,
+        steps, tools or lookups.
 
         Apps on this phone: ${apps().sorted().joinToString(", ")}
     """.trimIndent()
+
+    private fun handsPrompt(): String = if (AgentService.running) {
+        """
+        These use the phone itself and are visible to the user, so keep them for last:
+        {"do":"open","app":"Maps"}           launch an app by name
+        {"do":"tap","ref":3}                 press control [3] on the screen shown
+        {"do":"type","ref":5,"text":"..."}   type into field [5]
+        {"do":"enter"}                       press the keyboard's go or search key
+        {"do":"scroll","direction":"down"}   scroll the screen
+        {"do":"back"}                        go back
+
+        Only refer to control numbers from the screen you were just shown; numbers from
+        earlier screens now mean different things. After typing into a search field you
+        usually need "enter".
+        """.trimIndent()
+    } else {
+        "Using the phone's own apps is switched off, so the tools above are all you have."
+    }
 
     private fun parse(reply: String): Step? {
         val start = reply.indexOf('{')

@@ -50,69 +50,6 @@ class AiClient {
     }
 
     /**
-     * Streams a reply, calling [onDelta] on the IO thread for every token.
-     * Cancelling the calling coroutine aborts the request.
-     */
-    suspend fun send(
-        account: Account,
-        history: List<Turn>,
-        apps: List<String>,
-        onDelta: suspend (String) -> Unit,
-    ): Reply = withContext(Dispatchers.IO) {
-        require(account.ready) { "No AI account is set up yet." }
-        val turns = alternating(history)
-        val body = when (account.provider.wire) {
-            Wire.OPENAI -> openAiBody(account, turns, apps)
-            Wire.ANTHROPIC -> anthropicBody(account, turns, apps)
-        }
-        val path = if (account.provider.wire == Wire.ANTHROPIC) "/messages" else "/chat/completions"
-        val connection = open(account, path, "POST")
-
-        // A blocking socket read does not notice coroutine cancellation, so cancellation
-        // has to reach in and close the connection underneath it.
-        val closer = coroutineContext[Job]?.invokeOnCompletion {
-            if (it != null) runCatching { connection.disconnect() }
-        }
-
-        val text = StringBuilder()
-        try {
-            connection.doOutput = true
-            connection.setRequestProperty("Accept", "text/event-stream")
-            connection.outputStream.use { it.write(body.toString().toByteArray()) }
-
-            val status = connection.responseCode
-            if (status !in 200..299) {
-                val detail = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
-                throw AiError(humanize(status, detail, account))
-            }
-
-            connection.inputStream.bufferedReader().use { reader ->
-                val event = StringBuilder()
-                while (true) {
-                    coroutineContext.ensureActive()
-                    val line = reader.readLine()
-                    if (line == null) {
-                        consume(event, text, account)?.let { onDelta(it) }
-                        break
-                    }
-                    when {
-                        // A blank line ends an SSE event; its data lines are one document.
-                        line.isEmpty() -> consume(event, text, account)?.let { onDelta(it) }
-                        line.startsWith(":") -> Unit // keep-alive comment
-                        line.startsWith("data:") ->
-                            event.append(line.removePrefix("data:").removePrefix(" ")).append('\n')
-                        else -> Unit // event:, id:, retry:
-                    }
-                }
-            }
-        } finally {
-            closer?.dispose()
-            connection.disconnect()
-        }
-        finish(text.toString())
-    }
-
-    /**
      * One request, one answer, no streaming. Used by the agent loop, where the reply is a
      * single small instruction rather than prose to watch arrive.
      *
@@ -172,46 +109,27 @@ class AiClient {
                 connection.disconnect()
             }
 
-            val json = JSONObject(text)
-            val reply = if (anthropic) {
-                json.optJSONArray("content")?.optJSONObject(0)?.let { if (it.isNull("text")) null else it.optString("text") }
-            } else {
-                json.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
-                    ?.let { if (it.isNull("content")) null else it.optString("content") }
-            }
-            reply?.takeIf { it.isNotBlank() } ?: throw AiError("The assistant returned nothing.")
+            replyText(JSONObject(text), anthropic)
+                ?: throw AiError("The assistant returned nothing.")
         }
-
-    /** Drains one complete SSE event into [text], returning the token it carried. */
-    private fun consume(event: StringBuilder, text: StringBuilder, account: Account): String? {
-        val payload = event.toString().trimEnd('\n')
-        event.setLength(0)
-        if (payload.isEmpty() || payload == "[DONE]") return null
-        val json = runCatching { JSONObject(payload) }.getOrNull() ?: return null
-        // Some providers report failures inside a 200 stream. Those must not look like silence.
-        json.opt("error")?.let { throw AiError(humanize(200, payload, account)) }
-        val token = tokenOf(json) ?: return null
-        text.append(token)
-        return token
-    }
-
-    internal fun tokenOf(event: JSONObject): String? {
-        event.optJSONArray("choices")?.optJSONObject(0)?.let { choice ->
-            val delta = choice.optJSONObject("delta") ?: choice.optJSONObject("message")
-            // Deliberately not reasoning_content: a reasoning model's scratchpad is not
-            // an answer, and a home screen is the wrong place to read one.
-            delta?.text("content")?.let { return it }
-        }
-        return event.optJSONObject("delta")?.text("text")
-    }
 
     /**
-     * `optString` answers with the four characters "null" when a field is JSON null,
-     * which is how a reasoning model's empty content chunks turn into nullnullnull
-     * on screen. This returns nothing for nothing.
+     * Pulls the reply out of a finished response.
+     *
+     * `optString` answers with the four characters "null" for a field that is JSON null,
+     * which a reasoning model produces while it is still thinking, so every read here is
+     * guarded rather than trusted.
      */
-    private fun JSONObject.text(key: String): String? =
-        if (isNull(key)) null else optString(key).takeIf { it.isNotEmpty() }
+    internal fun replyText(json: JSONObject, anthropic: Boolean): String? {
+        val holder = if (anthropic) {
+            json.optJSONArray("content")?.optJSONObject(0)
+        } else {
+            json.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
+        } ?: return null
+        val key = if (anthropic) "text" else "content"
+        if (holder.isNull(key)) return null
+        return holder.optString(key).takeIf { it.isNotBlank() }
+    }
 
     /**
      * Anthropic rejects a history that does not strictly alternate starting from the user,

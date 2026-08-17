@@ -15,6 +15,7 @@ import dev.lumenberg.ai.Turn
 import dev.lumenberg.agent.Agent
 import dev.lumenberg.agent.AgentService
 import dev.lumenberg.agent.Outcome
+import dev.lumenberg.agent.Tools
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -31,6 +32,7 @@ import kotlinx.coroutines.withContext
 class Session(context: Context, private val scope: CoroutineScope) {
     private val store = AccountStore(context)
     private val client = AiClient()
+    private val tools = Tools(context)
 
     /** Every connected account, in the order they were added. */
     var accounts by mutableStateOf(store.load())
@@ -145,62 +147,15 @@ class Session(context: Context, private val scope: CoroutineScope) {
         turns += Turn("user", text)
         trim()
 
-        // With permission to use the phone, every request goes through the same path and
-        // the model decides whether it can just answer or has to go and do something.
-        if (AgentService.running) {
-            // An answer to the agent's own question resumes that request rather than
-            // starting a new one, which used to strand the model with a bare "the saved one".
-            val task = pending?.let { "$it\n\nThe user was asked a question and answered: $text" }
-                ?: text
-            pending = null
-            runTask(task, apps, onOpen)
-            return
-        }
-
-        streaming = ""
-        val names = apps()
-        val history = turns.toList()
-        job = scope.launch {
-            val sink = StringBuilder()
-            var lastPush = 0L
-            runCatching {
-                client.send(account, history, names) { token ->
-                    sink.append(token)
-                    // One state write per token would be one recomposition per token.
-                    // Pushing on a frame budget keeps the text alive and the list still.
-                    val now = System.currentTimeMillis()
-                    if (now - lastPush >= 50) {
-                        lastPush = now
-                        val snapshot = sink.toString()
-                        withContext(Dispatchers.Main) { streaming = snapshot }
-                    }
-                }
-            }.onSuccess { reply ->
-                withContext(Dispatchers.Main) {
-                    streaming = null
-                    when {
-                        reply.open != null && onOpen(reply.open) ->
-                            turns += Turn("assistant", "Opening ${reply.open}.")
-                        reply.open != null ->
-                            error = "There is no app here called \"${reply.open}\"."
-                        reply.text.isNotBlank() -> turns += Turn("assistant", reply.text)
-                        else -> error = "The assistant returned an empty reply."
-                    }
-                }
-            }.onFailure { failure ->
-                // This coroutine may already be cancelled, and the cleanup still has to run.
-                withContext(NonCancellable + Dispatchers.Main) {
-                    // A stopped reply is still worth keeping; the user watched it arrive.
-                    val partial = sink.toString().trim()
-                    streaming = null
-                    if (failure is CancellationException) {
-                        if (partial.isNotEmpty()) turns += Turn("assistant", partial)
-                    } else {
-                        error = failure.message ?: "That request did not go through."
-                    }
-                }
-            }
-        }
+        // Every request takes the same path. Most are finished by background lookups that
+        // need no permission at all; only the ones that genuinely need an app go near the
+        // screen, and only if the user turned that on.
+        // An answer to the agent's own question resumes that request rather than starting a
+        // new one, which used to strand the model with a bare "the saved one".
+        val task = pending?.let { "$it\n\nThe user was asked a question and answered: $text" }
+            ?: text
+        pending = null
+        runTask(task, apps, onOpen)
     }
 
     /**
@@ -209,7 +164,7 @@ class Session(context: Context, private val scope: CoroutineScope) {
      */
     private fun runTask(task: String, apps: () -> List<String>, onOpen: (String) -> Boolean) {
         working = "Working"
-        val agent = Agent(client, apps, onOpen)
+        val agent = Agent(client, tools, apps, onOpen)
         job = scope.launch {
             val outcome = runCatching {
                 agent.run(

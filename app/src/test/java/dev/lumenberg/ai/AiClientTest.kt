@@ -105,40 +105,33 @@ class AiClientTest {
         assertEquals("gpt-5", client.preferred(Provider.COPILOT, models))
     }
 
-    // --- stream token parsing ---------------------------------------------
+    // --- reply parsing -----------------------------------------------------
 
-    private fun token(json: String) = client.tokenOf(org.json.JSONObject(json))
+    private fun reply(json: String, anthropic: Boolean = false) =
+        client.replyText(org.json.JSONObject(json), anthropic)
 
     @Test
-    fun `a reasoning model's empty content chunks produce nothing, not the word null`() {
-        // DeepSeek's reasoner sends content: null while it is still thinking.
-        val chunk = """{"choices":[{"delta":{"content":null,"reasoning_content":"hmm"}}]}"""
-        assertNull(token(chunk))
+    fun `a reasoning model's null content is nothing, not the word null`() {
+        // DeepSeek's reasoner returns content: null while it is still thinking, and
+        // optString turns that into the literal characters "null".
+        assertNull(reply("""{"choices":[{"message":{"content":null}}]}"""))
     }
 
     @Test
-    fun `an ordinary OpenAI-shaped chunk yields its text`() {
-        assertEquals("Hey", token("""{"choices":[{"delta":{"content":"Hey"}}]}"""))
+    fun `an ordinary reply yields its text`() {
+        assertEquals("Hey", reply("""{"choices":[{"message":{"content":"Hey"}}]}"""))
     }
 
     @Test
-    fun `an Anthropic chunk yields its text`() {
-        assertEquals("Hey", token("""{"delta":{"text":"Hey"}}"""))
+    fun `an Anthropic reply yields its text`() {
+        assertEquals("Hey", reply("""{"content":[{"text":"Hey"}]}""", anthropic = true))
     }
 
     @Test
-    fun `a missing content field yields nothing`() {
-        assertNull(token("""{"choices":[{"delta":{}}]}"""))
-    }
-
-    @Test
-    fun `a keep-alive shaped event yields nothing`() {
-        assertNull(token("""{"choices":[{"delta":{"role":"assistant"}}]}"""))
-    }
-
-    @Test
-    fun `a non-streaming message body still yields its text`() {
-        assertEquals("Hi", token("""{"choices":[{"message":{"content":"Hi"}}]}"""))
+    fun `an empty or missing body yields nothing`() {
+        assertNull(reply("""{"choices":[{"message":{"content":""}}]}"""))
+        assertNull(reply("""{"choices":[]}"""))
+        assertNull(reply("""{}"""))
     }
 
     // --- provider wiring --------------------------------------------------

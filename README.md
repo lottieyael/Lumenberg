@@ -42,19 +42,39 @@ the buttons remain and these gestures sit alongside them.
 Using an accessibility service this way is against Google Play policy. That does not affect
 GitHub releases, but it would rule out Play distribution.
 
-**Doing things.** Optional, off by default, and separate from swipe navigation. With it on,
-a request is carried out in your apps rather than answered with instructions: the assistant
-is shown what is on screen, replies with one action at a time (open, tap, type, scroll,
-back), and Lumenberg performs it. The user sees progress and the result, not the steps.
+**Doing things.** A request is carried out rather than answered with instructions. Most of
+it happens in the background with nothing on screen and no permissions:
 
-`performGlobalAction` and reading the screen both require an accessibility service, so this
-is a second one, enabled separately from the gesture service and declared with the
-screen-reading capability the gesture service deliberately lacks.
+| Tool | Source |
+|---|---|
+| Look something up | Wikipedia search and summary |
+| Find a place, or things near one | Nominatim (OpenStreetMap) |
+| Travel time and distance | OSRM, driving, walking or cycling |
+| Weather | Open-Meteo |
+| Start navigation | Hands off to whichever maps app is installed |
 
-What leaves the device while a request runs: the foreground package name, the visible text,
-and the labels of controls, sent to the assistant provider you configured. Password fields
-are skipped. Nothing is sent when no request is running. There is no other redaction, so a
-banking app or a visible one-time code would be included if it is on screen at the time.
+None of these need an account, a key, or a connector. They are free public endpoints,
+called directly, identified by a Lumenberg user agent.
+
+There is no general web search, because every usable one requires an account and a key.
+Wikipedia answers factual questions well and nothing else pretends to.
+
+**Using your apps.** Separate, optional, off by default. When a request genuinely needs an
+app, for example sending a message, Lumenberg can operate it: the assistant is shown what
+is on screen, replies with one action at a time, and Lumenberg performs it. This is the
+slow, visible, permission-hungry path, so the assistant is told to prefer the tools above
+and only reach for an app when nothing else will do. With it switched off, everything in
+the table still works.
+
+Reading the screen and pressing Back both require an accessibility service, so this is a
+second one, enabled separately from the gesture service and declared with the screen
+reading capability the gesture service deliberately lacks.
+
+What leaves the device while an app is being driven: the foreground package name, the
+visible text, and the labels of controls, sent to the assistant provider you configured.
+Password fields are skipped. Nothing is sent when no request is running, and nothing is
+sent at all for requests answered by the tools. There is no other redaction, so a banking
+app or a visible one-time code would be included if it is on screen at the time.
 
 Before pressing anything whose label looks like sending, buying or deleting, it asks first,
 as an overlay above whatever app is in front. That check is a word list: it does not read
@@ -116,7 +136,7 @@ you press send. There is no analytics or telemetry.
 ## Install
 
 Download the APK from [Releases](../../releases), install it (`adb install
-Lumenberg-0.5.0.apk`), then press Home and select Lumenberg.
+Lumenberg-0.6.0.apk`), then press Home and select Lumenberg.
 
 ## Build
 
