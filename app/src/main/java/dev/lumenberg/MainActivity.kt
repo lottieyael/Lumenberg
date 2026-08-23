@@ -183,7 +183,9 @@ class MainActivity : ComponentActivity() {
                                 signInError = signInError,
                                 onOAuth = ::signInWithOpenRouter,
                                 onOpenUrl = ::openUrl,
-                                onDone = { overlay = Overlay.None },
+                                onDone = {
+                                    overlay = if (connectFrom == Overlay.Onboarding) Overlay.Onboarding else Overlay.None
+                                },
                             )
                         }
                         else -> Sheet("Lumenberg", onClose = null) {
@@ -258,7 +260,7 @@ class MainActivity : ComponentActivity() {
                 )
             signingIn = false
             if (session.ready) {
-                if (prefs.getBoolean("onboarded", false)) overlay = Overlay.None
+                overlay = if (prefs.getBoolean("onboarded", false)) Overlay.None else Overlay.Onboarding
             }
         }
     }
