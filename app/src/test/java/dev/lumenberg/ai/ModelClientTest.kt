@@ -1,5 +1,6 @@
 package dev.lumenberg.ai
 
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -13,8 +14,8 @@ class ModelClientTest {
     @Test
     fun `openai stream assembles a tool call`() {
         val state = StreamState(Wire.OPENAI)
-        state.accept(JSONObject("""{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"open_","arguments":"{\"na"}}]}}}]}"""))
-        state.accept(JSONObject("""{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"app","arguments":"me\":\"Camera\"}"}}]}}}]}"""))
+        state.accept(openAiToolDelta(0, "call-1", "open_", "{\"na"))
+        state.accept(openAiToolDelta(0, null, "app", "me\":\"Camera\"}"))
 
         val reply = state.finish()
         assertEquals(1, reply.calls.size)
@@ -26,8 +27,30 @@ class ModelClientTest {
     @Test
     fun `anthropic stream assembles a tool call`() {
         val state = StreamState(Wire.ANTHROPIC)
-        state.accept(JSONObject("""{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool-1","name":"open_app","input":{}}}"""))
-        state.accept(JSONObject("""{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"name\":\"Camera\"}"}}"""))
+        state.accept(
+            JSONObject()
+                .put("type", "content_block_start")
+                .put("index", 0)
+                .put(
+                    "content_block",
+                    JSONObject()
+                        .put("type", "tool_use")
+                        .put("id", "tool-1")
+                        .put("name", "open_app")
+                        .put("input", JSONObject()),
+                ),
+        )
+        state.accept(
+            JSONObject()
+                .put("type", "content_block_delta")
+                .put("index", 0)
+                .put(
+                    "delta",
+                    JSONObject()
+                        .put("type", "input_json_delta")
+                        .put("partial_json", "{\"name\":\"Camera\"}"),
+                ),
+        )
 
         val reply = state.finish()
         assertEquals(1, reply.calls.size)
@@ -39,8 +62,8 @@ class ModelClientTest {
     @Test
     fun `streamed prose stays prose`() {
         val state = StreamState(Wire.OPENAI)
-        assertEquals("Hello", state.accept(JSONObject("""{"choices":[{"delta":{"content":"Hello"}}]}""")))
-        assertEquals(" world", state.accept(JSONObject("""{"choices":[{"delta":{"content":" world"}}]}""")))
+        assertEquals("Hello", state.accept(openAiTextDelta("Hello")))
+        assertEquals(" world", state.accept(openAiTextDelta(" world")))
         assertEquals("Hello world", state.finish().text)
     }
 
@@ -103,5 +126,34 @@ class ModelClientTest {
     fun `a saved provider id survives a round trip`() {
         Provider.entries.forEach { assertEquals(it, Provider.of(it.id)) }
         assertEquals(Provider.OPENROUTER, Provider.of("something-we-removed"))
+    }
+
+    private fun openAiTextDelta(text: String) = JSONObject().put(
+        "choices",
+        JSONArray().put(JSONObject().put("delta", JSONObject().put("content", text))),
+    )
+
+    private fun openAiToolDelta(
+        index: Int,
+        id: String?,
+        name: String,
+        arguments: String,
+    ): JSONObject {
+        val call = JSONObject()
+            .put("index", index)
+            .put(
+                "function",
+                JSONObject().put("name", name).put("arguments", arguments),
+            )
+        if (id != null) call.put("id", id)
+        return JSONObject().put(
+            "choices",
+            JSONArray().put(
+                JSONObject().put(
+                    "delta",
+                    JSONObject().put("tool_calls", JSONArray().put(call)),
+                ),
+            ),
+        )
     }
 }
