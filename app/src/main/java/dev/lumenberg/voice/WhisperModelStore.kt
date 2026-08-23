@@ -58,8 +58,7 @@ class WhisperModelStore(context: Context) {
             require(written == MODEL_BYTES) {
                 "Speech model download was incomplete."
             }
-            val actual = digest.digest().joinToString("") { "%02x".format(it) }
-            require(actual == MODEL_SHA256) {
+            require(digest.digest().hex() == MODEL_SHA256) {
                 "Speech model did not pass its integrity check."
             }
 
@@ -88,6 +87,10 @@ class WhisperModelStore(context: Context) {
         const val MODEL_URL =
             "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.bin?download=true"
     }
+}
+
+internal fun ByteArray.hex(): String = joinToString("") { byte ->
+    "%02x".format(byte.toInt() and 0xff)
 }
 
 private fun File.readTextOrNull(): String? = runCatching { readText().trim() }.getOrNull()
