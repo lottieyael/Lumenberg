@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -13,6 +14,25 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import dev.lumenberg.device.DeviceAccessState
 import dev.lumenberg.device.DeviceCapability
+
+@Composable
+fun DeviceAccessOnboarding(
+    state: DeviceAccessState,
+    onRequest: (DeviceCapability) -> Unit,
+    onNext: () -> Unit,
+) {
+    Text(
+        "Choose what your agent can understand from the phone.",
+        style = MaterialTheme.typography.bodyLarge,
+    )
+    Text(
+        "Nothing here is required. Lumenberg checks these sources only when it needs current context or you ask for them.",
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    DeviceAccessPanel(state = state, onRequest = onRequest)
+    Button(onClick = onNext) { Text("Next") }
+}
 
 @Composable
 fun DeviceAccessPanel(
