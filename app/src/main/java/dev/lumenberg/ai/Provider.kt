@@ -74,6 +74,13 @@ enum class Provider(
     /** Anthropic speaks its own wire format; everyone else is OpenAI-shaped. */
     val wire: Wire get() = if (this == ANTHROPIC) Wire.ANTHROPIC else Wire.OPENAI
 
+    /**
+     * Copilot's private chat endpoint has not been verified with tool calls yet. Local
+     * servers vary by server and model, so they stay text-only until capability discovery exists.
+     */
+    val supportsTools: Boolean
+        get() = this != COPILOT && this != OLLAMA
+
     /** Where a user goes to get a key, when a key is the only option. */
     val keyUrl: String?
         get() = when (this) {
