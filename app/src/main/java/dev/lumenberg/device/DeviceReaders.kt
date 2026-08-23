@@ -11,6 +11,7 @@ import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
+import android.net.Uri
 import android.os.BatteryManager
 import android.provider.CalendarContract
 import android.provider.ContactsContract
@@ -128,20 +129,22 @@ class ContactReader(
         val clean = query.trim()
         require(clean.isNotEmpty()) { "A contact search is required." }
         val phone = ContactsContract.CommonDataKinds.Phone
+        val uri = Uri.withAppendedPath(phone.CONTENT_FILTER_URI, Uri.encode(clean)).buildUpon()
+            .appendQueryParameter(phone.SEARCH_DISPLAY_NAME_KEY, "true")
+            .appendQueryParameter(phone.SEARCH_PHONE_NUMBER_KEY, "true")
+            .build()
         val projection = arrayOf(
             phone.CONTACT_ID,
             phone.DISPLAY_NAME_PRIMARY,
             phone.NUMBER,
             phone.TYPE,
         )
-        val like = "%${clean.replace("%", "\\%").replace("_", "\\_")}%"
-        val selection = "${phone.DISPLAY_NAME_PRIMARY} LIKE ? ESCAPE '\\' OR ${phone.NUMBER} LIKE ? ESCAPE '\\'"
         val out = mutableListOf<ContactItem>()
         resolver.query(
-            phone.CONTENT_URI,
+            uri,
             projection,
-            selection,
-            arrayOf(like, like),
+            null,
+            null,
             "${phone.DISPLAY_NAME_PRIMARY} COLLATE LOCALIZED ASC",
         )?.use { cursor ->
             val id = cursor.getColumnIndexOrThrow(phone.CONTACT_ID)
@@ -190,6 +193,7 @@ class UsageReader(
             }
             .sortedByDescending { it.foregroundMs }
             .take(limit.coerceIn(1, 30))
+            .toList()
     }
 
     private fun appLabel(packageName: String): String = runCatching {
