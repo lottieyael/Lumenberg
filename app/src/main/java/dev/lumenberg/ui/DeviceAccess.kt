@@ -26,7 +26,7 @@ fun DeviceAccessOnboarding(
         style = MaterialTheme.typography.bodyLarge,
     )
     Text(
-        "Nothing here is required. Lumenberg checks these sources only when it needs current context or you ask for them.",
+        "Nothing here is required. Lumenberg checks these sources when building current context or when you ask for them.",
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -48,6 +48,11 @@ fun DeviceAccessPanel(
             Text("Device access", style = MaterialTheme.typography.titleMedium)
             Text(
                 "These let your agent understand the phone without opening apps. Each one is optional and can be changed later.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                "Context used for an answer is sent to the model provider you connected. Lumenberg does not upload these sources anywhere else.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
