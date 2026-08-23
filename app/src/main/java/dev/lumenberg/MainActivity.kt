@@ -77,10 +77,6 @@ class MainActivity : ComponentActivity() {
         if (result.resultCode == Activity.RESULT_OK && id != null) keep(id) else discard(id)
     }
 
-    /**
-     * The result intent carries the id, and reading it there is what survives the launcher
-     * being killed while a widget's configuration screen is in front.
-     */
     private fun androidx.activity.result.ActivityResult.idExtra(): Int? =
         data?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
             ?.takeIf { it != AppWidgetManager.INVALID_APPWIDGET_ID }
@@ -88,6 +84,27 @@ class MainActivity : ComponentActivity() {
     private val listen = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode != Activity.RESULT_OK) return@registerForActivityResult
         voice = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+    }
+
+    private val pickAvatar = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        lifecycleScope.launch {
+            session.setAvatar(uri)?.let(session::report)
+        }
+    }
+
+    private val exportAgent = registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        if (uri == null) return@registerForActivityResult
+        lifecycleScope.launch {
+            session.exportAgent(uri)?.let(session::report)
+        }
+    }
+
+    private val importAgent = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        lifecycleScope.launch {
+            session.importAgent(uri)?.let(session::report)
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -151,12 +168,15 @@ class MainActivity : ComponentActivity() {
                                 onRequestHome = ::requestHomeRole,
                                 onConnect = ::openConnect,
                                 onAddWidget = ::addWidget,
+                                onPickAvatar = { pickAvatar.launch("image/*") },
+                                onExportAgent = { exportAgent.launch("lumenberg-agent.zip") },
+                                onImportAgent = { importAgent.launch(arrayOf("application/zip", "application/octet-stream")) },
                             )
                         }
                         Overlay.Widgets -> Sheet("Add a widget", onClose = { overlay = Overlay.None }) {
                             Picker(onChoose = ::chooseWidget)
                         }
-                        Overlay.Connect -> Sheet("Connect an assistant", onClose = { overlay = connectFrom }) {
+                        Overlay.Connect -> Sheet("Connect a model", onClose = { overlay = connectFrom }) {
                             Connect(
                                 session = session,
                                 signingIn = signingIn,
@@ -168,11 +188,13 @@ class MainActivity : ComponentActivity() {
                         }
                         else -> Sheet("Lumenberg", onClose = null) {
                             Onboarding(
+                                session = session,
                                 step = step,
                                 homeRoleHeld = homeRoleHeld,
                                 aiReady = session.ready,
                                 onRequestHome = ::requestHomeRole,
                                 onConnect = ::openConnect,
+                                onPickAvatar = { pickAvatar.launch("image/*") },
                                 onNext = { step++ },
                                 onSkip = ::finishOnboarding,
                             )
@@ -236,8 +258,7 @@ class MainActivity : ComponentActivity() {
                 )
             signingIn = false
             if (session.ready) {
-                finishOnboarding()
-                overlay = Overlay.None
+                if (prefs.getBoolean("onboarded", false)) overlay = Overlay.None
             }
         }
     }
