@@ -27,6 +27,31 @@ class RememberTool(private val store: AgentStore) : Tool {
     }
 }
 
+class RecallTool(private val store: AgentStore) : Tool {
+    override val spec = ToolSpec(
+        name = "recall",
+        description = "Search durable memory about the user before answering when past preferences or facts may matter.",
+        parameters = JSONObject().apply {
+            put("type", "object")
+            put("properties", JSONObject().put("query", JSONObject().put("type", "string")))
+            put("required", JSONArray().put("query"))
+            put("additionalProperties", false)
+        },
+        risk = ToolRisk.READ,
+    )
+
+    override suspend fun execute(arguments: JSONObject): String {
+        val query = arguments.optString("query").trim()
+        require(query.isNotEmpty()) { "A memory query is required." }
+        val memories = store.searchMemories(query)
+        return if (memories.isEmpty()) {
+            "No matching memory found."
+        } else {
+            memories.joinToString("\n") { "- ${it.text}" }
+        }
+    }
+}
+
 class ForgetTool(private val store: AgentStore) : Tool {
     override val spec = ToolSpec(
         name = "forget",
