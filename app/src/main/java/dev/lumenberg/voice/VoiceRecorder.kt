@@ -47,10 +47,18 @@ class VoiceRecorder(context: Context) {
             setLength(0)
             write(ByteArray(44))
         }
+        try {
+            next.startRecording()
+        } catch (failure: Throwable) {
+            file.close()
+            next.release()
+            output.delete()
+            throw failure
+        }
+
         audio = next
         writer = file
         recording = true
-        next.startRecording()
         worker = thread(name = "lumenberg-voice", isDaemon = true) {
             val buffer = ByteArray(bufferSize)
             while (recording) {
