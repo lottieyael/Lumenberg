@@ -58,6 +58,7 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("dev.ffmpegkit-maintained:whisper-android:1.0.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 
