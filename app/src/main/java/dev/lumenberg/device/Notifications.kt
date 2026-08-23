@@ -35,20 +35,23 @@ internal class ActiveNotificationStore(private val root: File) {
 
     @Synchronized
     fun read(): List<StoredNotification> = runCatching {
-        if (!file.exists()) return emptyList()
-        val array = JSONArray(file.readText())
-        (0 until array.length()).mapNotNull { index ->
-            val item = array.optJSONObject(index) ?: return@mapNotNull null
-            runCatching {
-                StoredNotification(
-                    key = item.getString("key"),
-                    packageName = item.getString("package"),
-                    title = item.optString("title"),
-                    text = item.optString("text"),
-                    postedAt = item.optLong("postedAt"),
-                    clearable = item.optBoolean("clearable"),
-                )
-            }.getOrNull()
+        if (!file.exists()) {
+            emptyList()
+        } else {
+            val array = JSONArray(file.readText())
+            (0 until array.length()).mapNotNull { index ->
+                val item = array.optJSONObject(index) ?: return@mapNotNull null
+                runCatching {
+                    StoredNotification(
+                        key = item.getString("key"),
+                        packageName = item.getString("package"),
+                        title = item.optString("title"),
+                        text = item.optString("text"),
+                        postedAt = item.optLong("postedAt"),
+                        clearable = item.optBoolean("clearable"),
+                    )
+                }.getOrNull()
+            }
         }
     }.getOrDefault(emptyList())
 
@@ -118,7 +121,11 @@ class LumenbergNotificationListener : NotificationListenerService() {
             extras.getCharSequence(Notification.EXTRA_BIG_TEXT),
             extras.getCharSequence(Notification.EXTRA_TEXT),
             extras.getCharSequence(Notification.EXTRA_SUB_TEXT),
-        ).filterNotNull().map(CharSequence::toString).map(String::trim).firstOrNull(String::isNotEmpty).orEmpty()
+        )
+            .filterNotNull()
+            .map { it.toString().trim() }
+            .firstOrNull { it.isNotEmpty() }
+            .orEmpty()
         return StoredNotification(
             key = sbn.key,
             packageName = sbn.packageName,
@@ -140,7 +147,7 @@ class NotificationReader(
     suspend fun active(limit: Int = 20, packageFilter: String? = null): List<NotificationItem> =
         withContext(Dispatchers.IO) {
             check(access.snapshot().notifications) { "Notification access is not enabled." }
-            val filter = packageFilter?.trim()?.takeIf(String::isNotEmpty)
+            val filter = packageFilter?.trim()?.takeIf { it.isNotEmpty() }
             store.read().asSequence()
                 .filter { item ->
                     filter == null || item.packageName.contains(filter, ignoreCase = true) ||
