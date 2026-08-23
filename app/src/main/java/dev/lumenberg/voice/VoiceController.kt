@@ -4,7 +4,6 @@ import android.Manifest
 import android.content.Context
 import androidx.annotation.RequiresPermission
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
@@ -30,31 +29,54 @@ class VoiceController(context: Context) {
     val recording: Boolean get() = state == VoiceState.Recording
     val working: Boolean get() = state is VoiceState.Downloading || state == VoiceState.Transcribing
 
-    fun prepare(scope: CoroutineScope) {
-        if (models.ready || state is VoiceState.Downloading) return
+    fun prepare(
+        scope: CoroutineScope,
+        onReady: () -> Unit = {},
+        onFailure: (String) -> Unit = {},
+    ) {
+        if (models.ready) {
+            onReady()
+            return
+        }
+        if (state is VoiceState.Downloading) return
         state = VoiceState.Downloading(0f)
         scope.launch {
             runCatching {
                 models.download { progress -> state = VoiceState.Downloading(progress) }
             }.fold(
-                onSuccess = { state = VoiceState.Idle },
-                onFailure = { state = VoiceState.Failed(it.message ?: "Could not download the speech model.") },
+                onSuccess = {
+                    state = VoiceState.Idle
+                    onReady()
+                },
+                onFailure = {
+                    val message = it.message ?: "Could not download the speech model."
+                    state = VoiceState.Failed(message)
+                    onFailure(message)
+                },
             )
         }
     }
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
-    fun toggle(scope: CoroutineScope, onTranscript: (String) -> Unit) {
+    fun toggle(
+        scope: CoroutineScope,
+        onTranscript: (String) -> Unit,
+        onFailure: (String) -> Unit = {},
+    ) {
         when (state) {
-            VoiceState.Recording -> finish(scope, onTranscript)
+            VoiceState.Recording -> finish(scope, onTranscript, onFailure)
             VoiceState.Idle, is VoiceState.Failed -> {
                 if (!models.ready) {
-                    prepare(scope)
+                    prepare(scope, onFailure = onFailure)
                     return
                 }
                 runCatching { recorder.start() }.fold(
                     onSuccess = { state = VoiceState.Recording },
-                    onFailure = { state = VoiceState.Failed(it.message ?: "Could not start voice input.") },
+                    onFailure = {
+                        val message = it.message ?: "Could not start voice input."
+                        state = VoiceState.Failed(message)
+                        onFailure(message)
+                    },
                 )
             }
             is VoiceState.Downloading, VoiceState.Transcribing -> Unit
@@ -70,9 +92,15 @@ class VoiceController(context: Context) {
         if (state == VoiceState.Recording) state = VoiceState.Idle
     }
 
-    private fun finish(scope: CoroutineScope, onTranscript: (String) -> Unit) {
+    private fun finish(
+        scope: CoroutineScope,
+        onTranscript: (String) -> Unit,
+        onFailure: (String) -> Unit,
+    ) {
         val audio = runCatching { recorder.stop() }.getOrElse {
-            state = VoiceState.Failed(it.message ?: "Could not finish voice input.")
+            val message = it.message ?: "Could not finish voice input."
+            state = VoiceState.Failed(message)
+            onFailure(message)
             return
         }
         state = VoiceState.Transcribing
@@ -80,14 +108,18 @@ class VoiceController(context: Context) {
             runCatching { whisper.transcribe(audio) }.fold(
                 onSuccess = { text ->
                     if (text.isBlank()) {
-                        state = VoiceState.Failed("I could not hear any speech in that recording.")
+                        val message = "I could not hear any speech in that recording."
+                        state = VoiceState.Failed(message)
+                        onFailure(message)
                     } else {
                         state = VoiceState.Idle
                         onTranscript(text)
                     }
                 },
                 onFailure = {
-                    state = VoiceState.Failed(it.message ?: "Whisper could not transcribe that recording.")
+                    val message = it.message ?: "Whisper could not transcribe that recording."
+                    state = VoiceState.Failed(message)
+                    onFailure(message)
                 },
             )
         }
