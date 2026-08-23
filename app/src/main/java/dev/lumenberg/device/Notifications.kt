@@ -97,6 +97,11 @@ class LumenbergNotificationListener : NotificationListenerService() {
         persist()
     }
 
+    override fun onListenerDisconnected() {
+        runCatching { store.write(emptyList()) }
+        super.onListenerDisconnected()
+    }
+
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         persist()
     }
