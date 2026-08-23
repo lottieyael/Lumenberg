@@ -3,6 +3,8 @@ package dev.lumenberg.memory
 import dev.lumenberg.ai.Turn
 import org.json.JSONObject
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.util.UUID
 
 data class Memory(
@@ -48,6 +50,17 @@ class AgentStore(private val root: File) {
     fun loadMemories(limit: Int = 32): List<Memory> = readMemories()
         .sortedWith(compareByDescending<Memory> { it.pinned }.thenByDescending { it.updatedAt })
         .take(limit)
+
+    @Synchronized
+    fun searchMemories(query: String, limit: Int = 12): List<Memory> {
+        val clean = query.trim()
+        val source = loadMemories(Int.MAX_VALUE)
+        return if (clean.isEmpty()) {
+            source.take(limit)
+        } else {
+            source.filter { it.text.contains(clean, ignoreCase = true) }.take(limit)
+        }
+    }
 
     @Synchronized
     fun remember(text: String, pinned: Boolean = false): Memory {
@@ -113,12 +126,18 @@ class AgentStore(private val root: File) {
                 writer.newLine()
             }
         }
-        if (memoriesFile.exists() && !memoriesFile.delete()) {
+        runCatching {
+            Files.move(
+                temp.toPath(),
+                memoriesFile.toPath(),
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+        }.recoverCatching {
+            Files.move(temp.toPath(), memoriesFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        }.getOrElse {
             temp.delete()
-            error("Could not replace the memory file.")
-        }
-        if (!temp.renameTo(memoriesFile)) {
-            error("Could not save the memory file.")
+            throw it
         }
     }
 
