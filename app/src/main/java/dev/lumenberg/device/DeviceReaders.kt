@@ -128,16 +128,18 @@ class ContactReader(
         check(access.snapshot().contacts) { "Contacts access is not enabled." }
         val clean = query.trim()
         require(clean.isNotEmpty()) { "A contact search is required." }
-        val phone = ContactsContract.CommonDataKinds.Phone
-        val uri = Uri.withAppendedPath(phone.CONTENT_FILTER_URI, Uri.encode(clean)).buildUpon()
-            .appendQueryParameter(phone.SEARCH_DISPLAY_NAME_KEY, "true")
-            .appendQueryParameter(phone.SEARCH_PHONE_NUMBER_KEY, "true")
+        val uri = Uri.withAppendedPath(
+            ContactsContract.CommonDataKinds.Phone.CONTENT_FILTER_URI,
+            Uri.encode(clean),
+        ).buildUpon()
+            .appendQueryParameter(ContactsContract.CommonDataKinds.Phone.SEARCH_DISPLAY_NAME_KEY, "true")
+            .appendQueryParameter(ContactsContract.CommonDataKinds.Phone.SEARCH_PHONE_NUMBER_KEY, "true")
             .build()
         val projection = arrayOf(
-            phone.CONTACT_ID,
-            phone.DISPLAY_NAME_PRIMARY,
-            phone.NUMBER,
-            phone.TYPE,
+            ContactsContract.CommonDataKinds.Phone.CONTACT_ID,
+            ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME_PRIMARY,
+            ContactsContract.CommonDataKinds.Phone.NUMBER,
+            ContactsContract.CommonDataKinds.Phone.TYPE,
         )
         val out = mutableListOf<ContactItem>()
         resolver.query(
@@ -145,12 +147,12 @@ class ContactReader(
             projection,
             null,
             null,
-            "${phone.DISPLAY_NAME_PRIMARY} COLLATE LOCALIZED ASC",
+            "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME_PRIMARY} COLLATE LOCALIZED ASC",
         )?.use { cursor ->
-            val id = cursor.getColumnIndexOrThrow(phone.CONTACT_ID)
-            val name = cursor.getColumnIndexOrThrow(phone.DISPLAY_NAME_PRIMARY)
-            val number = cursor.getColumnIndexOrThrow(phone.NUMBER)
-            val type = cursor.getColumnIndexOrThrow(phone.TYPE)
+            val id = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.CONTACT_ID)
+            val name = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME_PRIMARY)
+            val number = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NUMBER)
+            val type = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.TYPE)
             while (cursor.moveToNext() && out.size < limit.coerceIn(1, 30)) {
                 out += ContactItem(
                     id = cursor.getLong(id),
