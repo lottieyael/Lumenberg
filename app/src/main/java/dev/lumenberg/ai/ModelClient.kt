@@ -17,6 +17,7 @@ import kotlin.coroutines.coroutineContext
 data class Turn(val role: String, val text: String)
 
 sealed interface ModelMessage {
+    data class Context(val text: String) : ModelMessage
     data class Text(val role: String, val text: String) : ModelMessage
     data class AssistantAction(val text: String, val calls: List<ToolCall>) : ModelMessage
     data class ToolOutputs(val results: List<ToolResult>) : ModelMessage
@@ -122,70 +123,82 @@ class ModelClient : ModelGateway {
         return state.accept(json)
     }
 
-    private fun system(hasTools: Boolean): String = buildString {
+    private fun system(hasTools: Boolean, context: String): String = buildString {
         append("You are the assistant built into the user's phone home screen. ")
         append("Answer in at most three short sentences unless asked for more. No preamble, no markdown headings. ")
         if (hasTools) {
             append("Use a tool when the user asks you to perform an available action. ")
-            append("Do not say an action succeeded until you have received its tool result.")
+            append("Do not say an action succeeded until you have received its tool result. ")
+        }
+        if (context.isNotBlank()) {
+            append("\n\nPersistent context:\n")
+            append(context.trim())
         }
     }
+
+    private fun contextOf(messages: List<ModelMessage>): String = messages
+        .filterIsInstance<ModelMessage.Context>()
+        .joinToString("\n\n") { it.text }
 
     private fun openAiBody(
         account: Account,
         messages: List<ModelMessage>,
         tools: List<ToolSpec>,
-    ) = JSONObject().apply {
-        put("model", account.model)
-        put("stream", true)
-        put("max_tokens", 800)
-        put("messages", JSONArray().apply {
-            put(JSONObject().put("role", "system").put("content", system(tools.isNotEmpty())))
-            messages.forEach { message ->
-                when (message) {
-                    is ModelMessage.Text -> put(
-                        JSONObject().put("role", message.role).put("content", message.text),
-                    )
-                    is ModelMessage.AssistantAction -> put(JSONObject().apply {
-                        put("role", "assistant")
-                        put("content", if (message.text.isBlank()) JSONObject.NULL else message.text)
-                        put("tool_calls", JSONArray().apply {
-                            message.calls.forEach { call ->
-                                put(JSONObject().apply {
-                                    put("id", call.id)
-                                    put("type", "function")
-                                    put("function", JSONObject().apply {
-                                        put("name", call.name)
-                                        put("arguments", call.arguments)
+    ): JSONObject {
+        val system = system(tools.isNotEmpty(), contextOf(messages))
+        return JSONObject().apply {
+            put("model", account.model)
+            put("stream", true)
+            put("max_tokens", 800)
+            put("messages", JSONArray().apply {
+                put(JSONObject().put("role", "system").put("content", system))
+                messages.forEach { message ->
+                    when (message) {
+                        is ModelMessage.Context -> Unit
+                        is ModelMessage.Text -> put(
+                            JSONObject().put("role", message.role).put("content", message.text),
+                        )
+                        is ModelMessage.AssistantAction -> put(JSONObject().apply {
+                            put("role", "assistant")
+                            put("content", if (message.text.isBlank()) JSONObject.NULL else message.text)
+                            put("tool_calls", JSONArray().apply {
+                                message.calls.forEach { call ->
+                                    put(JSONObject().apply {
+                                        put("id", call.id)
+                                        put("type", "function")
+                                        put("function", JSONObject().apply {
+                                            put("name", call.name)
+                                            put("arguments", call.arguments)
+                                        })
                                     })
-                                })
-                            }
+                                }
+                            })
                         })
-                    })
-                    is ModelMessage.ToolOutputs -> message.results.forEach { result ->
-                        put(JSONObject().apply {
-                            put("role", "tool")
-                            put("tool_call_id", result.callId)
-                            put("content", result.content)
-                        })
+                        is ModelMessage.ToolOutputs -> message.results.forEach { result ->
+                            put(JSONObject().apply {
+                                put("role", "tool")
+                                put("tool_call_id", result.callId)
+                                put("content", result.content)
+                            })
+                        }
                     }
                 }
-            }
-        })
-        if (tools.isNotEmpty()) {
-            put("tools", JSONArray().apply {
-                tools.forEach { tool ->
-                    put(JSONObject().apply {
-                        put("type", "function")
-                        put("function", JSONObject().apply {
-                            put("name", tool.name)
-                            put("description", tool.description)
-                            put("parameters", tool.parameters)
-                        })
-                    })
-                }
             })
-            put("tool_choice", "auto")
+            if (tools.isNotEmpty()) {
+                put("tools", JSONArray().apply {
+                    tools.forEach { tool ->
+                        put(JSONObject().apply {
+                            put("type", "function")
+                            put("function", JSONObject().apply {
+                                put("name", tool.name)
+                                put("description", tool.description)
+                                put("parameters", tool.parameters)
+                            })
+                        })
+                    }
+                })
+                put("tool_choice", "auto")
+            }
         }
     }
 
@@ -193,59 +206,63 @@ class ModelClient : ModelGateway {
         account: Account,
         messages: List<ModelMessage>,
         tools: List<ToolSpec>,
-    ) = JSONObject().apply {
-        put("model", account.model)
-        put("stream", true)
-        put("max_tokens", 800)
-        put("system", system(tools.isNotEmpty()))
-        put("messages", JSONArray().apply {
-            messages.forEach { message ->
-                when (message) {
-                    is ModelMessage.Text -> put(
-                        JSONObject().put("role", message.role).put("content", message.text),
-                    )
-                    is ModelMessage.AssistantAction -> put(JSONObject().apply {
-                        put("role", "assistant")
-                        put("content", JSONArray().apply {
-                            if (message.text.isNotBlank()) {
-                                put(JSONObject().put("type", "text").put("text", message.text))
-                            }
-                            message.calls.forEach { call ->
-                                put(JSONObject().apply {
-                                    put("type", "tool_use")
-                                    put("id", call.id)
-                                    put("name", call.name)
-                                    put("input", parseObject(call.arguments) ?: JSONObject())
-                                })
-                            }
+    ): JSONObject {
+        val system = system(tools.isNotEmpty(), contextOf(messages))
+        return JSONObject().apply {
+            put("model", account.model)
+            put("stream", true)
+            put("max_tokens", 800)
+            put("system", system)
+            put("messages", JSONArray().apply {
+                messages.forEach { message ->
+                    when (message) {
+                        is ModelMessage.Context -> Unit
+                        is ModelMessage.Text -> put(
+                            JSONObject().put("role", message.role).put("content", message.text),
+                        )
+                        is ModelMessage.AssistantAction -> put(JSONObject().apply {
+                            put("role", "assistant")
+                            put("content", JSONArray().apply {
+                                if (message.text.isNotBlank()) {
+                                    put(JSONObject().put("type", "text").put("text", message.text))
+                                }
+                                message.calls.forEach { call ->
+                                    put(JSONObject().apply {
+                                        put("type", "tool_use")
+                                        put("id", call.id)
+                                        put("name", call.name)
+                                        put("input", parseObject(call.arguments) ?: JSONObject())
+                                    })
+                                }
+                            })
                         })
-                    })
-                    is ModelMessage.ToolOutputs -> put(JSONObject().apply {
-                        put("role", "user")
-                        put("content", JSONArray().apply {
-                            message.results.forEach { result ->
-                                put(JSONObject().apply {
-                                    put("type", "tool_result")
-                                    put("tool_use_id", result.callId)
-                                    put("content", result.content)
-                                    if (!result.success) put("is_error", true)
-                                })
-                            }
+                        is ModelMessage.ToolOutputs -> put(JSONObject().apply {
+                            put("role", "user")
+                            put("content", JSONArray().apply {
+                                message.results.forEach { result ->
+                                    put(JSONObject().apply {
+                                        put("type", "tool_result")
+                                        put("tool_use_id", result.callId)
+                                        put("content", result.content)
+                                        if (!result.success) put("is_error", true)
+                                    })
+                                }
+                            })
                         })
-                    })
-                }
-            }
-        })
-        if (tools.isNotEmpty()) {
-            put("tools", JSONArray().apply {
-                tools.forEach { tool ->
-                    put(JSONObject().apply {
-                        put("name", tool.name)
-                        put("description", tool.description)
-                        put("input_schema", tool.parameters)
-                    })
+                    }
                 }
             })
+            if (tools.isNotEmpty()) {
+                put("tools", JSONArray().apply {
+                    tools.forEach { tool ->
+                        put(JSONObject().apply {
+                            put("name", tool.name)
+                            put("description", tool.description)
+                            put("input_schema", tool.parameters)
+                        })
+                    }
+                })
+            }
         }
     }
 

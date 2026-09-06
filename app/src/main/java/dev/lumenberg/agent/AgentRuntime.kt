@@ -18,11 +18,12 @@ class AgentRuntime(
         account: Account,
         history: List<Turn>,
         registry: ToolRegistry,
+        context: String = "",
         onDelta: suspend (String) -> Unit,
     ): String {
-        val messages = repairHistory(history).mapTo(mutableListOf<ModelMessage>()) {
-            ModelMessage.Text(it.role, it.text)
-        }
+        val messages = mutableListOf<ModelMessage>()
+        if (context.isNotBlank()) messages += ModelMessage.Context(context.trim())
+        messages += repairHistory(history).map { ModelMessage.Text(it.role, it.text) }
         val specs = if (account.provider.supportsTools) registry.specs else emptyList()
 
         repeat(MAX_ROUNDS) {

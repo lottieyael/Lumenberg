@@ -22,9 +22,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -56,17 +56,13 @@ import dev.lumenberg.ai.Provider
 import dev.lumenberg.ai.SignIn
 import kotlinx.coroutines.launch
 
-/** Full-screen sheet used for both first run and Settings. One layout, two entry points. */
 @Composable
 fun Sheet(
     title: String,
     onClose: (() -> Unit)?,
     content: @Composable () -> Unit,
 ) {
-    Surface(
-        Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.surface,
-    ) {
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
         Column(
             Modifier
                 .fillMaxSize()
@@ -106,10 +102,6 @@ fun Sheet(
     }
 }
 
-/**
- * Connecting an assistant. OpenRouter is first because it is the only one that signs a
- * person in without ever showing them an API key.
- */
 @Composable
 fun Connect(
     session: Session,
@@ -126,8 +118,6 @@ fun Connect(
     var device by remember { mutableStateOf<DeviceCode?>(null) }
     val scope = rememberCoroutineScope()
 
-    // Signing in via the browser lands back here with the account already filled in.
-    // Only a *change* closes the sheet, so opening it while connected still lets you switch.
     val alreadyConnected = remember { session.ready }
     LaunchedEffect(session.ready) { if (session.ready && !alreadyConnected) onDone() }
 
@@ -151,7 +141,7 @@ fun Connect(
             }
         }
         Text(
-            "Pick where your assistant comes from.",
+            "Pick where your agent's model comes from.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -167,10 +157,7 @@ fun Connect(
                     }
                 },
             ) {
-                Row(
-                    Modifier.padding(18.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
+                Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(entry.label, fontWeight = FontWeight.SemiBold)
@@ -190,10 +177,7 @@ fun Connect(
             }
         }
         Text(
-            "A ChatGPT Plus or Claude Pro plan will not work here. Those sign-ins exist, but " +
-                "they only cover each company's own apps: Anthropic's terms now forbid using " +
-                "them anywhere else, and OpenAI's works only inside Codex. OpenRouter is the " +
-                "closest honest equivalent, and it bills one account across every model.",
+            "A ChatGPT Plus or Claude Pro plan will not work here. Those subscriptions do not grant third-party API access. OpenRouter is the simplest one-account option if you do not want to manage provider keys.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -219,11 +203,7 @@ fun Connect(
             Card(tone = Tone.Accent) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Type this code on GitHub", style = MaterialTheme.typography.labelLarge)
-                    Text(
-                        code.userCode,
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                    )
+                    Text(code.userCode, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                     Text(code.verificationUri, style = MaterialTheme.typography.bodySmall)
                 }
             }
@@ -236,9 +216,7 @@ fun Connect(
             )
         }
 
-        failure?.let {
-            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-        }
+        failure?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
 
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedButton(onClick = { chosen = null; device = null }, enabled = !busy) { Text("Back") }
@@ -288,9 +266,7 @@ fun Connect(
         )
     }
 
-    failure?.let {
-        Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-    }
+    failure?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
 
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         OutlinedButton(onClick = { chosen = null }, enabled = !busy) { Text("Back") }
@@ -322,10 +298,7 @@ fun Connect(
 
 @Composable
 private fun Badge(text: String) {
-    Surface(
-        shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.primaryContainer,
-    ) {
+    Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.primaryContainer) {
         Text(
             text,
             Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
@@ -344,6 +317,9 @@ fun Settings(
     onRequestHome: () -> Unit,
     onConnect: () -> Unit,
     onAddWidget: () -> Unit,
+    onPickAvatar: () -> Unit,
+    onExportAgent: () -> Unit,
+    onImportAgent: () -> Unit,
 ) {
     LaunchedEffect(Unit) { session.loadModels() }
 
@@ -360,17 +336,20 @@ fun Settings(
         }
     }
 
+    ProfileEditor(
+        session = session,
+        onPickAvatar = onPickAvatar,
+        onExport = onExportAgent,
+        onImport = onImportAgent,
+    )
+
     Card {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (session.ready) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Rounded.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.width(10.dp))
-                    Labelled(
-                        session.account.provider.label,
-                        "Connected",
-                        Modifier.weight(1f),
-                    )
+                    Labelled(session.account.provider.label, "Connected", Modifier.weight(1f))
                     TextButton(onClick = session::signOut) { Text("Sign out") }
                 }
                 Text("Model", style = MaterialTheme.typography.labelLarge)
@@ -384,8 +363,8 @@ fun Settings(
                     ModelPicker(session)
                 }
             } else {
-                Labelled("No assistant connected", "Lumenberg still launches apps without one.")
-                Button(onClick = onConnect) { Text("Connect an assistant") }
+                Labelled("No model connected", "The launcher still works without one.")
+                Button(onClick = onConnect) { Text("Connect a model") }
             }
         }
     }
@@ -404,14 +383,12 @@ fun Settings(
     }
 
     Text(
-        "App use is counted on this device only, to order search results. Nothing is uploaded. " +
-            "Your assistant sees the text you type and the names of your installed apps.",
+        "Agent memory and conversation history stay on this phone unless you export them. API credentials are stored separately and are never included in an agent backup.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
 
-/** Long model lists are unusable as a wall of chips, so this shows the top ones and a filter. */
 @Composable
 private fun ModelPicker(session: Session) {
     var filter by remember { mutableStateOf("") }
@@ -443,37 +420,45 @@ private fun ModelPicker(session: Session) {
     }
 }
 
-/** First run: three screens, each one thing. */
 @Composable
 fun Onboarding(
+    session: Session,
     step: Int,
     homeRoleHeld: Boolean,
     aiReady: Boolean,
     onRequestHome: () -> Unit,
     onConnect: () -> Unit,
+    onPickAvatar: () -> Unit,
     onNext: () -> Unit,
     onSkip: () -> Unit,
 ) {
     when (step) {
         0 -> {
             Text(
-                "One screen. Your wallpaper, the widgets you actually read, and a bar that " +
-                    "launches apps or answers questions.",
+                "Lumenberg is a home screen built around one personal agent. Apps are still there when you want them, but you can increasingly ask for outcomes instead of operating the phone yourself.",
                 style = MaterialTheme.typography.bodyLarge,
             )
             Text(
-                "No pages to swipe. No folders to maintain. No grid of icons you stopped seeing.",
+                "Your agent, memory, and settings live on the phone and can be exported later. You do not need a Lumenberg account.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Button(onClick = onNext) { Text("Start") }
+            Button(onClick = onNext) { Text("Set up my agent") }
         }
         1 -> {
             Text(
+                "Make it yours. You can change all of this later.",
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            ProfileEditor(session = session, onPickAvatar = onPickAvatar)
+            Button(onClick = onNext) { Text("Next") }
+        }
+        2 -> {
+            Text(
                 if (homeRoleHeld) {
-                    "Lumenberg is your home screen. Pressing Home brings you back here."
+                    "Lumenberg is your home screen. Pressing Home brings you back to the same agent."
                 } else {
-                    "Android needs your say-so before Lumenberg can replace your current launcher."
+                    "Android needs your permission before Lumenberg can become the home screen."
                 },
                 style = MaterialTheme.typography.bodyLarge,
             )
@@ -484,12 +469,11 @@ fun Onboarding(
         }
         else -> {
             Text(
-                if (aiReady) "Your assistant is connected." else "Connect an assistant, or don't.",
+                if (aiReady) "Your model is connected." else "Pick the model that powers your agent.",
                 style = MaterialTheme.typography.bodyLarge,
             )
             Text(
-                "Lumenberg is a complete launcher without one. With one, the same bar answers " +
-                    "questions and opens apps you describe instead of name.",
+                "Lumenberg is BYOK. OpenRouter, direct provider keys, Copilot, and local models stay available, and your agent data is separate from the provider you choose.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
