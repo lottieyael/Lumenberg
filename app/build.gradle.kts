@@ -14,6 +14,12 @@ android {
         versionCode = 2
         versionName = "0.2.0"
 
+        // The free Whisper AAR currently ships arm64-v8a only. Keep this explicit so an
+        // x86 emulator fails at install time instead of crashing when voice is first used.
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -58,6 +64,7 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("dev.ffmpegkit-maintained:whisper-android:1.0.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 

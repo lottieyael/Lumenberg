@@ -1,15 +1,17 @@
 package dev.lumenberg
 
+import android.Manifest
 import android.app.Activity
 import android.app.role.RoleManager
 import android.appwidget.AppWidgetHost
 import android.appwidget.AppWidgetManager
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
-import android.speech.RecognizerIntent
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -27,11 +29,14 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import dev.lumenberg.ai.Account
 import dev.lumenberg.ai.OpenRouterAuth
 import dev.lumenberg.ai.Provider
+import dev.lumenberg.assistant.EXTRA_START_VOICE
 import dev.lumenberg.core.AppRepository
+import dev.lumenberg.core.LauncherApp
 import dev.lumenberg.ui.Connect
 import dev.lumenberg.ui.Home
 import dev.lumenberg.ui.LumenbergTheme
@@ -41,6 +46,7 @@ import dev.lumenberg.ui.Picker
 import dev.lumenberg.ui.Session
 import dev.lumenberg.ui.Settings as SettingsPane
 import dev.lumenberg.ui.Sheet
+import dev.lumenberg.voice.VoiceController
 import dev.lumenberg.widgets.Offer
 import dev.lumenberg.widgets.Panel
 import dev.lumenberg.widgets.WidgetStore
@@ -54,10 +60,12 @@ class MainActivity : ComponentActivity() {
     private lateinit var repository: AppRepository
     private lateinit var session: Session
     private lateinit var auth: OpenRouterAuth
+    private lateinit var voiceController: VoiceController
     private val prefs by lazy { getSharedPreferences("launcher", MODE_PRIVATE) }
 
     private var panels by mutableStateOf(emptyList<Panel>())
     private var homeRoleHeld by mutableStateOf(false)
+    private var assistantRoleHeld by mutableStateOf(false)
     private var voice by mutableStateOf<String?>(null)
     private var overlay by mutableStateOf(Overlay.None)
     private var step by mutableIntStateOf(0)
@@ -66,6 +74,7 @@ class MainActivity : ComponentActivity() {
     private var signInError by mutableStateOf<String?>(null)
     private var connectFrom = Overlay.Settings
     private var pendingWidget: Int? = null
+    private var pendingVoiceStart = false
 
     private val bindWidget = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val id = result.idExtra() ?: pendingWidget
@@ -81,9 +90,14 @@ class MainActivity : ComponentActivity() {
         data?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
             ?.takeIf { it != AppWidgetManager.INVALID_APPWIDGET_ID }
 
-    private val listen = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode != Activity.RESULT_OK) return@registerForActivityResult
-        voice = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
+    private val microphonePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted && pendingVoiceStart) {
+            pendingVoiceStart = false
+            toggleVoice()
+        } else if (!granted) {
+            pendingVoiceStart = false
+            session.report("Microphone permission is needed for voice input.")
+        }
     }
 
     private val pickAvatar = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -116,11 +130,12 @@ class MainActivity : ComponentActivity() {
         repository = AppRepository(this, lifecycleScope)
         session = Session(this, lifecycleScope)
         auth = OpenRouterAuth(this)
+        voiceController = VoiceController(this)
 
         dynamicColour = prefs.getBoolean("dynamic", true)
         overlay = if (prefs.getBoolean("onboarded", false)) Overlay.None else Overlay.Onboarding
         reloadPanels()
-        refreshHomeRole()
+        refreshRoles()
         handleAuthRedirect(intent)
 
         setContent {
@@ -205,12 +220,15 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+
+        handleVoiceIntent(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         handleAuthRedirect(intent)
+        handleVoiceIntent(intent)
         if (intent.hasCategory(Intent.CATEGORY_HOME) && overlay != Overlay.Onboarding) {
             overlay = Overlay.None
         }
@@ -224,7 +242,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        refreshHomeRole()
+        refreshRoles()
         reloadPanels()
     }
 
@@ -232,6 +250,11 @@ class MainActivity : ComponentActivity() {
         host.stopListening()
         repository.stop()
         super.onStop()
+    }
+
+    override fun onDestroy() {
+        voiceController.cancel()
+        super.onDestroy()
     }
 
     private fun openConnect() {
@@ -336,11 +359,78 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startListening() {
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            .putExtra(RecognizerIntent.EXTRA_PROMPT, "Ask or launch")
-        runCatching { listen.launch(intent) }
-            .onFailure { voice = null; session.report("This phone has no voice input installed.") }
+        if (voiceController.recording) {
+            toggleVoice()
+            return
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            pendingVoiceStart = true
+            microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+            return
+        }
+        toggleVoice()
+    }
+
+    private fun toggleVoice() {
+        if (!voiceController.modelReady) {
+            Toast.makeText(this, "Downloading the 142 MB speech model", Toast.LENGTH_LONG).show()
+            voiceController.prepare(
+                lifecycleScope,
+                onReady = {
+                    Toast.makeText(this, "Voice is ready. Tap the microphone and speak.", Toast.LENGTH_LONG).show()
+                },
+                onFailure = session::report,
+            )
+            return
+        }
+        voiceController.toggle(
+            lifecycleScope,
+            onTranscript = ::executeVoice,
+            onFailure = session::report,
+        )
+        if (voiceController.recording) {
+            Toast.makeText(this, "Listening. Tap the microphone again when you are done.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun executeVoice(transcript: String) {
+        val text = transcript.trim()
+        if (text.isEmpty()) return
+        val apps = repository.apps.value
+        val exact = repository.ranked(text, apps, 8)
+            .firstOrNull { it.label.equals(text, ignoreCase = true) }
+        when {
+            exact != null -> repository.launch(exact)
+            session.ready -> {
+                val names = repository.ranked("", apps, 40).map { it.label }
+                session.ask(text, names) { wanted -> openByName(wanted, apps) }
+            }
+            else -> {
+                voice = text
+                openConnect()
+            }
+        }
+    }
+
+    private fun openByName(wanted: String, apps: List<LauncherApp>): Boolean {
+        val target = apps.firstOrNull { it.label.equals(wanted, ignoreCase = true) }
+            ?: repository.ranked(wanted, apps, 1).firstOrNull()
+        return target != null && repository.launch(target)
+    }
+
+    private fun handleVoiceIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra(EXTRA_START_VOICE, false) != true) return
+        intent.removeExtra(EXTRA_START_VOICE)
+        window.decorView.post { startListening() }
+    }
+
+    private fun refreshRoles() {
+        refreshHomeRole()
+        assistantRoleHeld = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true
+        } else {
+            false
+        }
     }
 
     private fun refreshHomeRole() {
@@ -363,6 +453,13 @@ class MainActivity : ComponentActivity() {
         runCatching { startActivity(Intent(Settings.ACTION_HOME_SETTINGS)) }
     }
 
+    private fun requestAssistantRole() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        val manager = getSystemService(RoleManager::class.java) ?: return
+        if (!manager.isRoleAvailable(RoleManager.ROLE_ASSISTANT) || manager.isRoleHeld(RoleManager.ROLE_ASSISTANT)) return
+        runCatching { startActivity(manager.createRequestRoleIntent(RoleManager.ROLE_ASSISTANT)) }
+    }
+
     private fun useDynamicColour(on: Boolean) {
         dynamicColour = on
         prefs.edit().putBoolean("dynamic", on).apply()
@@ -371,6 +468,7 @@ class MainActivity : ComponentActivity() {
     private fun finishOnboarding() {
         prefs.edit().putBoolean("onboarded", true).apply()
         overlay = Overlay.None
+        if (!assistantRoleHeld) requestAssistantRole()
     }
 
     private companion object {
