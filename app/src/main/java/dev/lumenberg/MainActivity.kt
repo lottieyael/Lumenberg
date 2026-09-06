@@ -175,7 +175,7 @@ class MainActivity : ComponentActivity() {
                     onConnect = ::openConnect,
                     onAddWidget = ::addWidget,
                     onRemoveWidget = ::removeWidget,
-                    onResizeWidget = { id, height -> widgets.resize(id, height); reloadPanels() },
+                    onResizeWidget = { panel -> widgets.resize(panel); reloadPanels() },
                     onMoveWidget = { id, by -> widgets.move(id, by); reloadPanels() },
                     onRequestHome = ::requestHomeRole,
                 )

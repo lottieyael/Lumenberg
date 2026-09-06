@@ -10,15 +10,14 @@ import android.os.Build
 import android.os.Bundle
 import android.util.SizeF
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -33,12 +32,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.KeyboardArrowDown
-import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.UnfoldMore
 import androidx.compose.material3.FilledIconButton
@@ -58,9 +54,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -70,7 +68,9 @@ import dev.lumenberg.widgets.Panel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.floor
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun Home(
     repository: AppRepository,
@@ -87,7 +87,7 @@ fun Home(
     onConnect: () -> Unit,
     onAddWidget: () -> Unit,
     onRemoveWidget: (Int) -> Unit,
-    onResizeWidget: (Int, Int) -> Unit,
+    onResizeWidget: (Panel) -> Unit,
     onMoveWidget: (Int, Int) -> Unit,
     onRequestHome: () -> Unit,
 ) {
@@ -205,17 +205,31 @@ fun Home(
                         }
                     }
                 } else {
-                    items(panels, key = { it.id }) { panel ->
-                        key(panel.id) {
-                            WidgetPanel(
-                                host = host,
-                                panel = panel,
-                                editing = editing,
-                                onEdit = { editing = true },
-                                onRemove = { onRemoveWidget(panel.id) },
-                                onResize = { onResizeWidget(panel.id, it) },
-                                onMove = { onMoveWidget(panel.id, it) },
-                            )
+                    item {
+                        BoxWithConstraints(Modifier.fillMaxWidth()) {
+                            val available = maxWidth.value
+                            val density = LocalDensity.current.density
+                            FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(Motion.Gap),
+                                verticalArrangement = Arrangement.spacedBy(Motion.Gap),
+                            ) {
+                                panels.forEach { panel ->
+                                    key(panel.id) {
+                                        WidgetPanel(
+                                            host = host,
+                                            panel = panel,
+                                            // Round down so two half widths never overflow a row by one pixel.
+                                            width = floor(panel.widthDp(available, Motion.Gap.value) * density) / density,
+                                            editing = editing,
+                                            onEdit = { editing = true },
+                                            onRemove = { onRemoveWidget(panel.id) },
+                                            onResize = onResizeWidget,
+                                            onMove = { onMoveWidget(panel.id, it) },
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -334,101 +348,78 @@ private fun Crown(
     }
 }
 
-/**
- * Hosts one real Android widget. Long-press turns on the arrange controls, which is where
- * every launcher has put them for fifteen years.
- */
+/** Hosts the provider's actual view at its measured size, with a separate grab strip. */
 @Composable
 private fun WidgetPanel(
     host: AppWidgetHost,
     panel: Panel,
+    width: Float,
     editing: Boolean,
     onEdit: () -> Unit,
     onRemove: () -> Unit,
-    onResize: (Int) -> Unit,
+    onResize: (Panel) -> Unit,
     onMove: (Int) -> Unit,
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
     val manager = remember { AppWidgetManager.getInstance(context) }
     val info = remember(panel.id) { manager.getAppWidgetInfo(panel.id) }
-    val height by animateDpAsState(panel.height.dp, label = "widget")
+    var sizing by remember(panel.id) { mutableStateOf(false) }
+    val height = panel.heightDp(width)
 
-    Card {
-        Column {
-            // A grab strip, because wrapping the widget itself in a click handler would
-            // swallow every tap the widget's own app expects to receive.
-            Grabber(editing = editing, onEdit = onEdit)
-
-            Box(Modifier.fillMaxWidth()) {
+    Column(Modifier.width(width.dp)) {
+        Grabber(editing = false, onEdit = { onEdit(); sizing = true })
+        Card {
+            Box {
                 if (info == null) {
-                    Column(Modifier.padding(18.dp)) {
-                        Labelled("This widget's app is gone", "Remove it to tidy up.")
+                    Column(Modifier.padding(12.dp)) {
+                        Text("Widget unavailable")
                         TextButton(onClick = onRemove) { Text("Remove") }
                     }
                 } else {
-                    // The size handshake is an IPC to system_server plus a broadcast to the
-                    // widget's app, so it fires when the size settles, never per frame.
+                    // Measurement triggers the initial handshake and handles rotation/density
+                    // changes. Reading view.width in update alone misses the first layout.
+                    var measured by remember(panel.id) { mutableStateOf(IntSize.Zero) }
                     var told by remember(panel.id) { mutableStateOf(0 to 0) }
                     AndroidView(
                         factory = { host.createView(context, panel.id, info) },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(height),
+                            .height(height.dp)
+                            .onSizeChanged { measured = it },
                         update = { view ->
-                            val widthDp = with(density) { view.width.toDp().value.toInt() }
-                            if (widthDp > 0 && (widthDp to panel.height) != told) {
-                                told = widthDp to panel.height
-                                val size = SizeF(widthDp.toFloat(), panel.height.toFloat())
+                            val size = with(density) {
+                                measured.width.toDp().value.toInt() to measured.height.toDp().value.toInt()
+                            }
+                            val (w, h) = size
+                            if (w > 0 && h > 0 && size != told) {
+                                told = size
                                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                    view.updateAppWidgetSize(Bundle(), listOf(size))
+                                    view.updateAppWidgetSize(Bundle(), listOf(SizeF(w.toFloat(), h.toFloat())))
                                 } else {
-                                    // Bundle.EMPTY is immutable; updateAppWidgetSize writes into it.
                                     @Suppress("DEPRECATION")
-                                    view.updateAppWidgetSize(
-                                        Bundle(), widthDp, panel.height, widthDp, panel.height,
-                                    )
+                                    view.updateAppWidgetSize(Bundle(), w, h, w, h)
                                 }
                             }
                         },
                     )
                 }
-
-                Arrange(
-                    editing = editing,
-                    modifier = Modifier.align(Alignment.BottomEnd),
-                    onRemove = onRemove,
-                    onMove = onMove,
-                    onResize = {
-                        onResize(Panel.STEPS.firstOrNull { it > panel.height } ?: Panel.STEPS.first())
-                    },
-                )
+                if (editing) {
+                    Box(Modifier.align(Alignment.BottomEnd).padding(6.dp)) {
+                        Chip(Icons.Rounded.UnfoldMore, "Resize widget") { sizing = true }
+                    }
+                }
             }
         }
     }
-}
-
-/** The controls that appear over a widget once the user is arranging. */
-@Composable
-private fun Arrange(
-    editing: Boolean,
-    modifier: Modifier,
-    onRemove: () -> Unit,
-    onMove: (Int) -> Unit,
-    onResize: () -> Unit,
-) {
-    AnimatedVisibility(
-        visible = editing,
-        modifier = modifier,
-        enter = fadeIn(Motion.Fade),
-        exit = fadeOut(Motion.Fade),
-    ) {
-        Row(Modifier.padding(10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Chip(Icons.Rounded.KeyboardArrowUp, "Move up") { onMove(-1) }
-            Chip(Icons.Rounded.KeyboardArrowDown, "Move down") { onMove(1) }
-            Chip(Icons.Rounded.UnfoldMore, "Resize", onResize)
-            Chip(Icons.Rounded.Close, "Remove", onRemove)
-        }
+    if (sizing) {
+        WidgetSizeDialog(
+            panel = panel,
+            onDismiss = { sizing = false },
+            onSave = { onResize(it); sizing = false },
+            onMove = { onMove(it); sizing = false },
+            onRemove = { onRemove(); sizing = false },
+        )
     }
 }
 

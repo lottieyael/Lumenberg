@@ -6,11 +6,31 @@ import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.roundToInt
 
-/** A hosted widget and the height in dp the user settled on. */
-data class Panel(val id: Int, val height: Int = DEFAULT_HEIGHT) {
+/** Width is in quarter-row spans; old layouts default to a full row. */
+data class Panel(
+    val id: Int,
+    val height: Int = DEFAULT_HEIGHT,
+    val span: Int = 4,
+    val square: Boolean = false,
+) {
+    fun widthDp(available: Float, gap: Float): Float =
+        ((available + gap) * span.coerceIn(1, 4) / 4f - gap).coerceIn(1f, available.coerceAtLeast(1f))
+
+    fun heightDp(width: Float): Float = if (square) width else height.coerceIn(80, 640).toFloat()
+
+    fun toJson(): JSONObject = JSONObject().put("id", id).put("h", height)
+        .put("span", span).put("square", square)
+
     companion object {
         const val DEFAULT_HEIGHT = 168
         val STEPS = listOf(112, 168, 248, 340)
+
+        fun fromJson(json: JSONObject): Panel = Panel(
+            id = json.optInt("id", -1),
+            height = json.optInt("h", DEFAULT_HEIGHT).coerceIn(80, 640),
+            span = json.optInt("span", 4).coerceIn(1, 4),
+            square = json.optBoolean("square", false),
+        )
 
         /**
          * `AppWidgetProviderInfo.minWidth/minHeight` are documented as dp but the framework
@@ -33,7 +53,7 @@ class WidgetStore(context: Context) {
         val array = JSONArray(prefs.getString("panels", "[]"))
         (0 until array.length()).mapNotNull { i ->
             array.optJSONObject(i)?.let {
-                Panel(it.optInt("id", -1), it.optInt("h", Panel.DEFAULT_HEIGHT))
+                Panel.fromJson(it)
             }?.takeIf { it.id >= 0 }
         }
     }.getOrDefault(emptyList())
@@ -45,8 +65,8 @@ class WidgetStore(context: Context) {
 
     fun remove(id: Int) = save(load().filterNot { it.id == id })
 
-    fun resize(id: Int, height: Int) =
-        save(load().map { if (it.id == id) it.copy(height = height) else it })
+    fun resize(panel: Panel) =
+        save(load().map { if (it.id == panel.id) panel else it })
 
     fun move(id: Int, by: Int) {
         val panels = load().toMutableList()
@@ -64,7 +84,7 @@ class WidgetStore(context: Context) {
 
     private fun save(panels: List<Panel>) {
         val array = JSONArray()
-        panels.forEach { array.put(JSONObject().put("id", it.id).put("h", it.height)) }
+        panels.forEach { array.put(it.toJson()) }
         prefs.edit().putString("panels", array.toString()).apply()
     }
 }
