@@ -17,9 +17,12 @@ reply streams into a card above the bar. The assistant knows which apps you have
 "open the thing I take notes in" launches it.
 
 **Glance.** Real Android widgets, hosted directly, in the order you put them, at the
-height you chose. Lumenberg picks them with its own catalogue showing what each one looks
-like, rather than handing you the system's alphabetical list. Tap the handle on a widget
-to rearrange.
+width and height you chose. Tap a widget's handle to choose Square, Wide, or Tall,
+then adjust its width (a quarter, half, three quarters, or a full row) and height.
+Keep square preserves equal width and height when the screen changes. Smaller widgets
+share a row, and existing layouts retain their saved full-width sizes. Save applies the
+layout; Cancel leaves it unchanged. The same dialog lets you reorder or remove widgets.
+Lumenberg uses its own widget catalogue with previews.
 
 ## Connecting an assistant
 
@@ -69,13 +72,21 @@ touch disk.
 
 ## What it does not do
 
-- Send anything anywhere on its own. App-use counts stay on the device and exist only to
-  order search results.
+- Send messages, make purchases, or perform financial or destructive actions through the
+  agent. The current tool policy denies those action categories.
 - Replace your notification shade, recents, or gesture navigation. That is the system's job.
 - Work with subscription logins. See above.
 
-Your assistant provider does see the text you type and the names of your installed apps.
-That is the whole of what leaves the phone, and only when you press send.
+When you ask the assistant, your connected model provider receives your prompt, recent
+conversation, agent profile, remembered facts, and installed app names. If you grant the
+optional device permissions, current context can also include notifications, calendar
+entries, app usage, media, battery, and last known location. Contacts are queried through
+a tool when needed. These permissions are optional and explained during setup.
+
+Conversation and memory persist locally. Agent backups contain the profile, memories,
+conversation, and avatar; provider credentials are excluded. Voice uses a downloaded
+Whisper model for local transcription. These agent changes still need an integrated
+Android build and device validation.
 
 ## Install
 
@@ -107,7 +118,7 @@ before you distribute anything of your own.
 ai/          Providers, the account and its keystore-sealed credential, streaming client,
              OpenRouter PKCE sign-in
 core/        Installed-app list, ranking, icon cache
-widgets/     The widget catalogue, and what is on screen in what order at what height
+widgets/     The widget catalogue, and what is on screen, its order, width, height, and square lock
 ui/          Theme and motion, the command bar, the sheets, the home screen
 ```
 
@@ -128,12 +139,12 @@ Stated plainly, because a launcher that overpromises is one you cannot trust wit
   client outside GitHub's own SDK uses, but GitHub has not committed to it. If it moves,
   Copilot breaks and the other providers do not.
 - Work profiles and secondary users are not listed; the current user only.
-- Widget heights are chosen from four steps rather than dragged, and the cycle wraps from
-  the largest step back to the smallest.
+- Widgets can be square, wide, or tall, with independently saved dimensions. Their own
+  apps may impose minimum sizes or supply layouts that do not adapt to every shape.
 - A widget keeps the provider metadata it had when it was added until the launcher process
   restarts, so a widget's app updating itself will not resize it.
-- The assistant's ability to launch apps depends on the model following one instruction.
-  Small local models will sometimes ignore it.
+- Agent actions use structured tool calls. Models without tool support can chat but cannot
+  perform phone actions. External and financial actions are not enabled.
 - `usesCleartextTraffic` is on so a self-hosted machine on your LAN can be reached over
   HTTP. Addresses that are not plainly local are sent to HTTPS instead.
 
