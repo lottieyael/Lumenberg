@@ -5,11 +5,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import dev.lumenberg.agent.AgentRuntime
+import dev.lumenberg.agent.OpenAppTool
+import dev.lumenberg.agent.ToolRegistry
 import dev.lumenberg.ai.Account
 import dev.lumenberg.ai.AccountStore
-import dev.lumenberg.ai.AiClient
 import dev.lumenberg.ai.DeviceCode
 import dev.lumenberg.ai.GitHubAuth
+import dev.lumenberg.ai.ModelClient
 import dev.lumenberg.ai.Provider
 import dev.lumenberg.ai.Turn
 import kotlinx.coroutines.CancellationException
@@ -26,7 +29,8 @@ import kotlinx.coroutines.withContext
  */
 class Session(context: Context, private val scope: CoroutineScope) {
     private val store = AccountStore(context)
-    private val client = AiClient()
+    private val client = ModelClient()
+    private val runtime = AgentRuntime(client)
 
     var account by mutableStateOf(store.load())
         private set
@@ -45,10 +49,6 @@ class Session(context: Context, private val scope: CoroutineScope) {
     val ready: Boolean get() = account.ready
     val active: Boolean get() = turns.isNotEmpty() || busy || error != null
 
-    /**
-     * Verifies a candidate account by listing its models, then keeps it.
-     * Returns null on success or a sentence to show the user.
-     */
     suspend fun connect(candidate: Account): String? {
         val found = runCatching { client.models(candidate) }
             .getOrElse { return it.message ?: "Could not reach ${candidate.provider.label}." }
@@ -68,7 +68,6 @@ class Session(context: Context, private val scope: CoroutineScope) {
         if (runCatching { store.save(next) }.isSuccess) account = next
     }
 
-    /** Refreshes the model list for the saved account, e.g. when opening Settings. */
     fun loadModels() {
         if (!account.ready) return
         scope.launch { models = runCatching { client.models(account) }.getOrDefault(models) }
@@ -82,9 +81,6 @@ class Session(context: Context, private val scope: CoroutineScope) {
         models = emptyList()
     }
 
-    /**
-     * [onOpen] is asked to launch an app by name and answers whether it managed to.
-     */
     fun ask(text: String, apps: List<String>, onOpen: (String) -> Boolean) {
         if (text.isBlank() || busy) return
         error = null
@@ -92,14 +88,14 @@ class Session(context: Context, private val scope: CoroutineScope) {
         trim()
         streaming = ""
         val history = turns.toList()
+        val registry = ToolRegistry(listOf(OpenAppTool(apps, onOpen)))
+
         job = scope.launch {
             val sink = StringBuilder()
             var lastPush = 0L
             runCatching {
-                client.send(account, history, apps) { token ->
+                runtime.run(account, history, registry) { token ->
                     sink.append(token)
-                    // One state write per token would be one recomposition per token.
-                    // Pushing on a frame budget keeps the text alive and the list still.
                     val now = System.currentTimeMillis()
                     if (now - lastPush >= 50) {
                         lastPush = now
@@ -110,19 +106,14 @@ class Session(context: Context, private val scope: CoroutineScope) {
             }.onSuccess { reply ->
                 withContext(Dispatchers.Main) {
                     streaming = null
-                    when {
-                        reply.open != null && onOpen(reply.open) ->
-                            turns += Turn("assistant", "Opening ${reply.open}.")
-                        reply.open != null ->
-                            error = "There is no app here called \"${reply.open}\"."
-                        reply.text.isNotBlank() -> turns += Turn("assistant", reply.text)
-                        else -> error = "The assistant returned an empty reply."
+                    if (reply.isNotBlank()) {
+                        turns += Turn("assistant", reply)
+                    } else {
+                        error = "The assistant returned an empty reply."
                     }
                 }
             }.onFailure { failure ->
-                // This coroutine may already be cancelled, and the cleanup still has to run.
                 withContext(NonCancellable + Dispatchers.Main) {
-                    // A stopped reply is still worth keeping; the user watched it arrive.
                     val partial = sink.toString().trim()
                     streaming = null
                     if (failure is CancellationException) {
@@ -135,15 +126,10 @@ class Session(context: Context, private val scope: CoroutineScope) {
         }
     }
 
-    /**
-     * Runs GitHub's device flow to the end and keeps the account. Returns null on success
-     * or a sentence to show; [onCode] fires as soon as there is a code to display.
-     */
     suspend fun signInWithGitHub(onCode: (DeviceCode) -> Unit): String? {
         val auth = GitHubAuth()
         if (!auth.configured) {
-            return "This build has no GitHub client id compiled in, so Copilot sign-in is off. " +
-                "See the README."
+            return "This build has no GitHub client id compiled in, so Copilot sign-in is off. See the README."
         }
         val code = runCatching { auth.start() }
             .getOrElse { return it.message ?: "Could not reach GitHub." }
@@ -153,7 +139,6 @@ class Session(context: Context, private val scope: CoroutineScope) {
         return connect(Account(provider = Provider.COPILOT, credential = token))
     }
 
-    /** Surfaces a message in the same place replies appear. */
     fun report(message: String) {
         error = message
     }
@@ -170,10 +155,6 @@ class Session(context: Context, private val scope: CoroutineScope) {
         error = null
     }
 
-    /**
-     * Keeps the context small and well-formed: recent turns only, always starting on a
-     * user turn, because Anthropic rejects histories that do not.
-     */
     private fun trim(keep: Int = 12) {
         while (turns.size > keep) turns.removeAt(0)
         while (turns.isNotEmpty() && turns.first().role != "user") turns.removeAt(0)
