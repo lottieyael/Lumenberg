@@ -116,7 +116,6 @@ class MainActivity : ComponentActivity() {
                     host = host,
                     panels = panels,
                     apps = apps,
-                    // Back belongs to whatever is on top; the home screen must not steal it.
                     enabled = overlay == Overlay.None,
                     homeRoleHeld = homeRoleHeld,
                     voice = voice,
@@ -131,7 +130,6 @@ class MainActivity : ComponentActivity() {
                     onRequestHome = ::requestHomeRole,
                 )
 
-                // Keep showing the sheet that is leaving, or every close flashes onboarding.
                 var showing by remember { mutableStateOf(overlay) }
                 LaunchedEffect(overlay) { if (overlay != Overlay.None) showing = overlay }
 
@@ -189,10 +187,8 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleAuthRedirect(intent)
-        // Pressing Home while already here should feel like arriving, not like nothing happened.
         if (intent.hasCategory(Intent.CATEGORY_HOME) && overlay != Overlay.Onboarding) {
             overlay = Overlay.None
-            session.clear()
         }
     }
 
@@ -214,9 +210,6 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
 
-    // --- AI sign-in -------------------------------------------------------
-
-    /** Remembers where the user came from, so closing Connect goes back there. */
     private fun openConnect() {
         if (overlay != Overlay.Connect) connectFrom = overlay
         overlay = Overlay.Connect
@@ -255,16 +248,10 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // --- Widgets ----------------------------------------------------------
-
     private fun addWidget() {
         overlay = Overlay.Widgets
     }
 
-    /**
-     * Binds a provider the user chose from Lumenberg's own catalogue. Binding usually
-     * succeeds outright; when the system wants explicit consent, it asks for it.
-     */
     private fun chooseWidget(offer: Offer) {
         overlay = Overlay.None
         discard(pendingWidget)
@@ -297,7 +284,6 @@ class MainActivity : ComponentActivity() {
             .setComponent(configure)
             .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
         runCatching { configureWidget.launch(intent) }.onFailure {
-            // A configuration screen we cannot open should not cost the user the widget.
             keep(id)
         }
     }
@@ -306,7 +292,6 @@ class MainActivity : ComponentActivity() {
         val info = AppWidgetManager.getInstance(this).getAppWidgetInfo(id)
         widgets.add(id, Panel.fitHeight(info?.minHeight ?: 0, resources.displayMetrics))
         pendingWidget = null
-        // Deliberately no pruning here: the id may not be visible to our host yet.
         panels = widgets.load()
     }
 
@@ -321,18 +306,11 @@ class MainActivity : ComponentActivity() {
         reloadPanels()
     }
 
-    /**
-     * Drops widget ids the system has forgotten, so dead cards cannot accumulate.
-     * An empty answer is treated as "ask again later", never as "delete everything":
-     * losing a screen of widgets to a transient system state is unforgivable.
-     */
     private fun reloadPanels() {
         val live = runCatching { host.appWidgetIds.toSet() }.getOrDefault(emptySet())
         if (live.isNotEmpty()) widgets.retain(live)
         panels = widgets.load()
     }
-
-    // --- Odds and ends ----------------------------------------------------
 
     private fun startListening() {
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)

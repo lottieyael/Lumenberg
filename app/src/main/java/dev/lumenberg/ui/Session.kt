@@ -15,6 +15,10 @@ import dev.lumenberg.ai.GitHubAuth
 import dev.lumenberg.ai.ModelClient
 import dev.lumenberg.ai.Provider
 import dev.lumenberg.ai.Turn
+import dev.lumenberg.memory.AgentStore
+import dev.lumenberg.memory.ForgetTool
+import dev.lumenberg.memory.RecallTool
+import dev.lumenberg.memory.RememberTool
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,22 +26,20 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
-/**
- * Everything the assistant needs to exist: the account, the conversation, the in-flight request.
- * Lives as long as the launcher process so a stray recomposition never drops a reply.
- */
 class Session(context: Context, private val scope: CoroutineScope) {
-    private val store = AccountStore(context)
+    private val accountStore = AccountStore(context)
+    private val agentStore = AgentStore(File(context.filesDir, "agent"))
     private val client = ModelClient()
     private val runtime = AgentRuntime(client)
 
-    var account by mutableStateOf(store.load())
+    var account by mutableStateOf(accountStore.load())
         private set
     var models by mutableStateOf(emptyList<String>())
         private set
 
-    val turns = mutableStateListOf<Turn>()
+    val turns = mutableStateListOf<Turn>().apply { addAll(agentStore.loadTurns()) }
     var streaming by mutableStateOf<String?>(null)
         private set
     var error by mutableStateOf<String?>(null)
@@ -57,7 +59,8 @@ class Session(context: Context, private val scope: CoroutineScope) {
             ?: client.preferred(candidate.provider, found)
             ?: found.first()
         val next = candidate.copy(model = chosen)
-        runCatching { store.save(next) }.onFailure { return it.message ?: "Could not save that sign-in." }
+        runCatching { accountStore.save(next) }
+            .onFailure { return it.message ?: "Could not save that sign-in." }
         models = found
         account = next
         return null
@@ -65,7 +68,7 @@ class Session(context: Context, private val scope: CoroutineScope) {
 
     fun useModel(model: String) {
         val next = account.copy(model = model)
-        if (runCatching { store.save(next) }.isSuccess) account = next
+        if (runCatching { accountStore.save(next) }.isSuccess) account = next
     }
 
     fun loadModels() {
@@ -75,8 +78,7 @@ class Session(context: Context, private val scope: CoroutineScope) {
 
     fun signOut() {
         stop()
-        clear()
-        store.clear()
+        accountStore.clear()
         account = Account()
         models = emptyList()
     }
@@ -84,11 +86,20 @@ class Session(context: Context, private val scope: CoroutineScope) {
     fun ask(text: String, apps: List<String>, onOpen: (String) -> Boolean) {
         if (text.isBlank() || busy) return
         error = null
-        turns += Turn("user", text)
+        val user = Turn("user", text.trim())
+        turns += user
+        agentStore.appendTurn(user)
         trim()
         streaming = ""
         val history = turns.toList()
-        val registry = ToolRegistry(listOf(OpenAppTool(apps, onOpen)))
+        val registry = ToolRegistry(
+            listOf(
+                OpenAppTool(apps, onOpen),
+                RecallTool(agentStore),
+                RememberTool(agentStore),
+                ForgetTool(agentStore),
+            ),
+        )
 
         job = scope.launch {
             val sink = StringBuilder()
@@ -107,7 +118,10 @@ class Session(context: Context, private val scope: CoroutineScope) {
                 withContext(Dispatchers.Main) {
                     streaming = null
                     if (reply.isNotBlank()) {
-                        turns += Turn("assistant", reply)
+                        val assistant = Turn("assistant", reply)
+                        turns += assistant
+                        agentStore.appendTurn(assistant)
+                        trim()
                     } else {
                         error = "The assistant returned an empty reply."
                     }
@@ -117,7 +131,12 @@ class Session(context: Context, private val scope: CoroutineScope) {
                     val partial = sink.toString().trim()
                     streaming = null
                     if (failure is CancellationException) {
-                        if (partial.isNotEmpty()) turns += Turn("assistant", partial)
+                        if (partial.isNotEmpty()) {
+                            val assistant = Turn("assistant", partial)
+                            turns += assistant
+                            agentStore.appendTurn(assistant)
+                            trim()
+                        }
                     } else {
                         error = failure.message ?: "That request did not go through."
                     }
@@ -152,10 +171,11 @@ class Session(context: Context, private val scope: CoroutineScope) {
     fun clear() {
         stop()
         turns.clear()
+        agentStore.clearTurns()
         error = null
     }
 
-    private fun trim(keep: Int = 12) {
+    private fun trim(keep: Int = 40) {
         while (turns.size > keep) turns.removeAt(0)
         while (turns.isNotEmpty() && turns.first().role != "user") turns.removeAt(0)
     }
