@@ -16,6 +16,8 @@ import dev.lumenberg.ai.GitHubAuth
 import dev.lumenberg.ai.ModelClient
 import dev.lumenberg.ai.Provider
 import dev.lumenberg.ai.Turn
+import dev.lumenberg.device.DeviceAccessState
+import dev.lumenberg.device.DeviceRuntime
 import dev.lumenberg.memory.AgentBackup
 import dev.lumenberg.memory.AgentProfile
 import dev.lumenberg.memory.AgentProfileStore
@@ -40,6 +42,7 @@ class Session(context: Context, private val scope: CoroutineScope) {
     private val profileStore = AgentProfileStore(agentRoot)
     private val client = ModelClient()
     private val runtime = AgentRuntime(client)
+    private val device = DeviceRuntime(this.context)
 
     var account by mutableStateOf(accountStore.load())
         private set
@@ -60,6 +63,8 @@ class Session(context: Context, private val scope: CoroutineScope) {
     val ready: Boolean get() = account.ready
     val active: Boolean get() = turns.isNotEmpty() || busy || error != null
     val avatarFile: File get() = profileStore.avatarFile
+
+    fun deviceAccess(): DeviceAccessState = device.accessState()
 
     suspend fun connect(candidate: Account): String? {
         val found = runCatching { client.models(candidate) }
@@ -156,9 +161,9 @@ class Session(context: Context, private val scope: CoroutineScope) {
                 RecallTool(agentStore),
                 RememberTool(agentStore),
                 ForgetTool(agentStore),
-            ),
+            ) + device.tools(),
         )
-        val context = buildString {
+        val stableContext = buildString {
             append(profile.prompt())
             val memories = agentStore.memoryContext()
             if (memories.isNotBlank()) {
@@ -171,7 +176,15 @@ class Session(context: Context, private val scope: CoroutineScope) {
             val sink = StringBuilder()
             var lastPush = 0L
             runCatching {
-                runtime.run(account, history, registry, context) { token ->
+                val liveContext = runCatching { device.promptContext() }.getOrDefault("")
+                val agentContext = buildString {
+                    append(stableContext)
+                    if (liveContext.isNotBlank()) {
+                        append("\n\n")
+                        append(liveContext)
+                    }
+                }
+                runtime.run(account, history, registry, agentContext) { token ->
                     sink.append(token)
                     val now = System.currentTimeMillis()
                     if (now - lastPush >= 50) {

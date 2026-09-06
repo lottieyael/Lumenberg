@@ -37,7 +37,11 @@ import dev.lumenberg.ai.Provider
 import dev.lumenberg.assistant.EXTRA_START_VOICE
 import dev.lumenberg.core.AppRepository
 import dev.lumenberg.core.LauncherApp
+import dev.lumenberg.device.DeviceAccessState
+import dev.lumenberg.device.DeviceCapability
 import dev.lumenberg.ui.Connect
+import dev.lumenberg.ui.DeviceAccessOnboarding
+import dev.lumenberg.ui.DeviceAccessPanel
 import dev.lumenberg.ui.Home
 import dev.lumenberg.ui.LumenbergTheme
 import dev.lumenberg.ui.Motion
@@ -66,6 +70,7 @@ class MainActivity : ComponentActivity() {
     private var panels by mutableStateOf(emptyList<Panel>())
     private var homeRoleHeld by mutableStateOf(false)
     private var assistantRoleHeld by mutableStateOf(false)
+    private var deviceAccess by mutableStateOf(DeviceAccessState())
     private var voice by mutableStateOf<String?>(null)
     private var overlay by mutableStateOf(Overlay.None)
     private var step by mutableIntStateOf(0)
@@ -98,6 +103,18 @@ class MainActivity : ComponentActivity() {
             pendingVoiceStart = false
             session.report("Microphone permission is needed for voice input.")
         }
+    }
+
+    private val calendarPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+        refreshDeviceAccess()
+    }
+
+    private val contactsPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+        refreshDeviceAccess()
+    }
+
+    private val locationPermissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        refreshDeviceAccess()
     }
 
     private val pickAvatar = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -136,6 +153,7 @@ class MainActivity : ComponentActivity() {
         overlay = if (prefs.getBoolean("onboarded", false)) Overlay.None else Overlay.Onboarding
         reloadPanels()
         refreshRoles()
+        refreshDeviceAccess()
         handleAuthRedirect(intent)
 
         setContent {
@@ -187,6 +205,10 @@ class MainActivity : ComponentActivity() {
                                 onExportAgent = { exportAgent.launch("lumenberg-agent.zip") },
                                 onImportAgent = { importAgent.launch(arrayOf("application/zip", "application/octet-stream")) },
                             )
+                            DeviceAccessPanel(
+                                state = deviceAccess,
+                                onRequest = ::requestDeviceAccess,
+                            )
                         }
                         Overlay.Widgets -> Sheet("Add a widget", onClose = { overlay = Overlay.None }) {
                             Picker(onChoose = ::chooseWidget)
@@ -204,17 +226,25 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         else -> Sheet("Lumenberg", onClose = null) {
-                            Onboarding(
-                                session = session,
-                                step = step,
-                                homeRoleHeld = homeRoleHeld,
-                                aiReady = session.ready,
-                                onRequestHome = ::requestHomeRole,
-                                onConnect = ::openConnect,
-                                onPickAvatar = { pickAvatar.launch("image/*") },
-                                onNext = { step++ },
-                                onSkip = ::finishOnboarding,
-                            )
+                            if (step == DEVICE_ACCESS_STEP) {
+                                DeviceAccessOnboarding(
+                                    state = deviceAccess,
+                                    onRequest = ::requestDeviceAccess,
+                                    onNext = { step++ },
+                                )
+                            } else {
+                                Onboarding(
+                                    session = session,
+                                    step = if (step > DEVICE_ACCESS_STEP) step - 1 else step,
+                                    homeRoleHeld = homeRoleHeld,
+                                    aiReady = session.ready,
+                                    onRequestHome = ::requestHomeRole,
+                                    onConnect = ::openConnect,
+                                    onPickAvatar = { pickAvatar.launch("image/*") },
+                                    onNext = { step++ },
+                                    onSkip = ::finishOnboarding,
+                                )
+                            }
                         }
                     }
                 }
@@ -243,6 +273,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         refreshRoles()
+        refreshDeviceAccess()
         reloadPanels()
     }
 
@@ -433,6 +464,29 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun refreshDeviceAccess() {
+        if (::session.isInitialized) deviceAccess = session.deviceAccess()
+    }
+
+    private fun requestDeviceAccess(capability: DeviceCapability) {
+        when (capability) {
+            DeviceCapability.NOTIFICATIONS -> runCatching {
+                startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+            }
+            DeviceCapability.CALENDAR -> calendarPermission.launch(Manifest.permission.READ_CALENDAR)
+            DeviceCapability.CONTACTS -> contactsPermission.launch(Manifest.permission.READ_CONTACTS)
+            DeviceCapability.USAGE -> runCatching {
+                startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+            }
+            DeviceCapability.LOCATION -> locationPermissions.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                ),
+            )
+        }
+    }
+
     private fun refreshHomeRole() {
         homeRoleHeld = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_HOME) == true
@@ -473,5 +527,6 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val HOST_ID = 0x0A11
+        const val DEVICE_ACCESS_STEP = 3
     }
 }
