@@ -336,6 +336,7 @@ fun Settings(
         }
     }
 
+    MemoryManager(session)
     ProfileEditor(
         session = session,
         onPickAvatar = onPickAvatar,

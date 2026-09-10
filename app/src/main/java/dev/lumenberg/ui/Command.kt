@@ -225,7 +225,20 @@ fun Thread(
                 contentPadding = PaddingValues(start = 14.dp, end = 14.dp, bottom = 14.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(turns.size) { i -> Bubble(turns[i]) }
+                items(turns.size) { i ->
+                    Column {
+                        Bubble(turns[i])
+                        if (turns[i].role == "assistant") {
+                            val prompt = turns.take(i).lastOrNull { it.role == "user" }?.text
+                            if (prompt != null) {
+                                val alreadyPinned = session.cards.any { it.prompt == prompt && it.text == turns[i].text }
+                                TextButton(enabled = !alreadyPinned, onClick = { session.pinAnswer(prompt, turns[i].text) }) {
+                                    Text(if (alreadyPinned) "Pinned to home" else "Pin to home")
+                                }
+                            }
+                        }
+                    }
+                }
                 streaming?.let { text ->
                     item {
                         if (text.isEmpty()) Working() else Bubble(Turn("assistant", text))

@@ -24,6 +24,21 @@ share a row, and existing layouts retain their saved full-width sizes. Save appl
 layout; Cancel leaves it unchanged. The same dialog lets you reorder or remove widgets.
 Lumenberg uses its own widget catalogue with previews.
 
+## Home cards, memory, and local commands
+
+- Use **Pin to home** below an assistant answer to keep it on the home screen. Each card
+  records its original prompt and last-updated time. **Refresh** asks your connected model
+  for a new answer using current context; failures keep the previous answer. Refresh tools
+  are read-only. **Unpin** removes the card. Cards survive restarts and travel with agent backups.
+- Open **Settings → Memory** to inspect all remembered facts. **Why? / Edit** shows the
+  original request, lets you correct the fact, or deletes that exact memory. Older facts
+  honestly show that no source was recorded. Conversation history is separate from memory.
+- Type an exact app name, **open Maps**, or **launch Spotify** to launch locally. **Pause
+  music**, **resume music**, **next track**, and **previous track** use Android media controls.
+  These commands need no AI connection; music controls need notification access and an
+  active media session. Other requests continue to the assistant. Ambiguous app names
+  require choosing the app instead of guessing.
+
 ## Connecting an assistant
 
 Lumenberg is a complete launcher without one. If you want one:
@@ -85,8 +100,7 @@ a tool when needed. These permissions are optional and explained during setup.
 
 Conversation and memory persist locally. Agent backups contain the profile, memories,
 conversation, and avatar; provider credentials are excluded. Voice uses a downloaded
-Whisper model for local transcription. These agent changes still need an integrated
-Android build and device validation.
+Whisper model for local transcription. The model receives context only when you ask or explicitly refresh a card.
 
 ## Install
 
@@ -94,7 +108,7 @@ Download the APK from [Releases](../../releases), install it, then press Home an
 Lumenberg.
 
 ```bash
-adb install Lumenberg-0.2.0.apk
+adb install Lumenberg-0.3.0.apk
 ```
 
 ## Build

@@ -124,12 +124,15 @@ fun Home(
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return
         val names = repository.ranked("", apps, 40).map { it.label }
-        session.ask(trimmed, names) { wanted ->
+        val openNamed: (String) -> Boolean = { wanted ->
             // Models paraphrase ("Google Chrome" for "Chrome"), so fall back to the same
             // ranking the search box uses rather than demanding an exact label.
             val target = apps.firstOrNull { it.label.equals(wanted, ignoreCase = true) }
                 ?: repository.ranked(wanted, apps, 1).firstOrNull()
             target != null && repository.launch(target)
+        }
+        if (!session.tryLocal(trimmed, apps.map { it.label }, openNamed)) {
+            if (session.ready) session.ask(trimmed, names, openNamed) else onConnect()
         }
         query = ""
         drawer = false
@@ -138,13 +141,7 @@ fun Home(
     fun submit() {
         val text = query.trim()
         if (text.isEmpty()) return
-        // Typing an app's name and pressing Go launches it; anything else is a question.
-        val exact = results.firstOrNull { it.label.equals(text, ignoreCase = true) }
-        when {
-            exact != null -> open(exact)
-            session.ready -> ask(text)
-            else -> onConnect()
-        }
+        ask(text)
     }
 
     BackHandler(enabled = enabled && (searching || session.active || editing)) {
@@ -189,6 +186,9 @@ fun Home(
                     }
                 }
 
+                items(session.cards.size, key = { "card:" + session.cards[it].id }) { index ->
+                    PinnedAnswerCard(session.cards[index], session)
+                }
                 if (panels.isEmpty()) {
                     item {
                         Card(Modifier.combinedClickable(onClick = onAddWidget)) {

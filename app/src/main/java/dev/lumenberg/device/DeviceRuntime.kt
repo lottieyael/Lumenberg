@@ -34,6 +34,8 @@ class DeviceRuntime(context: Context) {
     private val battery = BatteryReader(context.applicationContext)
     private val location = LocationReader(context, access)
 
+    suspend fun controlMedia(action: String): MediaItem = media.control(action)
+
     fun accessState(): DeviceAccessState = access.snapshot()
 
     fun tools(): List<Tool> = listOf(

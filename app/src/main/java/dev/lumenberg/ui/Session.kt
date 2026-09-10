@@ -8,6 +8,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.lumenberg.agent.AgentRuntime
 import dev.lumenberg.agent.OpenAppTool
+import dev.lumenberg.agent.ToolRisk
+import dev.lumenberg.cards.HomeCard
+import dev.lumenberg.cards.HomeCardStore
+import dev.lumenberg.core.LocalCommand
+import dev.lumenberg.core.localCommand
 import dev.lumenberg.agent.ToolRegistry
 import dev.lumenberg.ai.Account
 import dev.lumenberg.ai.AccountStore
@@ -39,6 +44,8 @@ class Session(context: Context, private val scope: CoroutineScope) {
     private val agentRoot = File(this.context.filesDir, "agent")
     private val accountStore = AccountStore(this.context)
     private val agentStore = AgentStore(agentRoot)
+    private val cardStore = HomeCardStore(agentRoot)
+    private val cardJobs = mutableMapOf<String, Job>()
     private val profileStore = AgentProfileStore(agentRoot)
     private val client = ModelClient()
     private val runtime = AgentRuntime(client)
@@ -49,6 +56,15 @@ class Session(context: Context, private val scope: CoroutineScope) {
     var models by mutableStateOf(emptyList<String>())
         private set
     var profile by mutableStateOf(profileStore.load())
+        private set
+
+    var cards by mutableStateOf(cardStore.load())
+        private set
+    var memories by mutableStateOf(agentStore.loadMemories(Int.MAX_VALUE))
+        private set
+    var refreshingCards by mutableStateOf(emptySet<String>())
+        private set
+    var cardErrors by mutableStateOf(emptyMap<String, String>())
         private set
 
     val turns = mutableStateListOf<Turn>().apply { addAll(agentStore.loadTurns()) }
@@ -63,6 +79,96 @@ class Session(context: Context, private val scope: CoroutineScope) {
     val ready: Boolean get() = account.ready
     val active: Boolean get() = turns.isNotEmpty() || busy || error != null
     val avatarFile: File get() = profileStore.avatarFile
+
+    fun pinAnswer(prompt: String, text: String) {
+        runCatching { cardStore.pin(prompt, text); cards = cardStore.load() }
+            .onFailure { report(it.message ?: "Could not pin that answer.") }
+    }
+
+    fun removeCard(id: String) {
+        cardJobs.remove(id)?.cancel()
+        cardStore.remove(id)
+        cards = cardStore.load()
+        cardErrors = cardErrors - id
+    }
+
+    fun editMemory(id: String, text: String) {
+        if (busy) return
+        runCatching { agentStore.edit(id, text); reloadMemories() }
+            .onFailure { report(it.message ?: "Could not edit memory.") }
+    }
+
+    fun deleteMemory(id: String) {
+        if (busy) return
+        runCatching { agentStore.delete(id); reloadMemories() }
+            .onFailure { report(it.message ?: "Could not delete memory.") }
+    }
+
+    private fun reloadMemories() { memories = agentStore.loadMemories(Int.MAX_VALUE) }
+
+    fun refreshCard(card: HomeCard) {
+        if (card.id in refreshingCards) return
+        if (!ready) {
+            cardErrors = cardErrors + (card.id to "Connect a model in Settings to refresh this card.")
+            return
+        }
+        refreshingCards = refreshingCards + card.id
+        cardErrors = cardErrors - card.id
+        val selectedAccount = account
+        cardJobs[card.id] = scope.launch {
+            try {
+                val context = profile.prompt() + "\n" + agentStore.memoryContext() + "\n" + device.promptContext()
+                // Refreshes can inspect current facts, but cannot open apps, change memory, or control media.
+                val registry = ToolRegistry(listOf(RecallTool(agentStore)) + device.tools().filter { it.spec.risk == ToolRisk.READ })
+                val reply = runtime.run(selectedAccount, listOf(Turn("user", card.prompt)), registry,
+                    context + "\nRefresh a pinned home card. Return the current answer only. Do not perform actions.") {}
+                check(reply.isNotBlank()) { "The model returned an empty answer." }
+                cardStore.update(card.id, reply)
+                cards = cardStore.load()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                cardErrors = cardErrors + (card.id to (failure.message ?: "Refresh failed. Your previous answer is kept."))
+            } finally {
+                refreshingCards = refreshingCards - card.id
+                cardJobs.remove(card.id)
+            }
+        }
+    }
+
+    /** Returns true only for recognized local commands, including a local failure. */
+    fun tryLocal(text: String, apps: List<String>, onOpen: (String) -> Boolean): Boolean {
+        val command = localCommand(text, apps) ?: return false
+        if (busy) return true
+        error = null
+        when (command) {
+            is LocalCommand.Open -> {
+                if (!onOpen(command.app)) report("Could not open ${command.app}.")
+            }
+            is LocalCommand.Ambiguous -> report("More than one app is named ${command.app}. Choose it from the app list.")
+            is LocalCommand.Media -> {
+                streaming = ""
+                job = scope.launch {
+                    try {
+                        val media = device.controlMedia(command.action)
+                        val user = Turn("user", text.trim())
+                        val reply = Turn("assistant", "Sent ${command.action} to ${media.app} locally.")
+                        turns.addAll(listOf(user, reply))
+                        agentStore.appendTurn(user)
+                        agentStore.appendTurn(reply)
+                        trim()
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (failure: Exception) {
+                        report(failure.message ?: "Could not control music.")
+                    } finally {
+                        streaming = null
+                    }
+                }
+            }
+        }
+        return true
+    }
 
     fun deviceAccess(): DeviceAccessState = device.accessState()
 
@@ -92,6 +198,7 @@ class Session(context: Context, private val scope: CoroutineScope) {
     }
 
     fun signOut() {
+        cardJobs.values.toList().forEach { it.cancel() }
         stop()
         accountStore.clear()
         account = Account()
@@ -130,6 +237,10 @@ class Session(context: Context, private val scope: CoroutineScope) {
     }
 
     suspend fun importAgent(uri: Uri): String? {
+        job?.cancel()
+        job?.join()
+        cardJobs.values.toList().forEach { it.cancel() }
+        cardJobs.values.toList().forEach { it.join() }
         val failure = withContext(Dispatchers.IO) {
             runCatching {
                 val input = context.contentResolver.openInputStream(uri)
@@ -138,6 +249,8 @@ class Session(context: Context, private val scope: CoroutineScope) {
             }.exceptionOrNull()?.message
         }
         if (failure == null) {
+            cards = cardStore.load()
+            reloadMemories()
             profile = profileStore.load()
             turns.clear()
             turns.addAll(agentStore.loadTurns())
@@ -159,7 +272,7 @@ class Session(context: Context, private val scope: CoroutineScope) {
             listOf(
                 OpenAppTool(apps, onOpen),
                 RecallTool(agentStore),
-                RememberTool(agentStore),
+                RememberTool(agentStore, sourcePrompt = text.trim()),
                 ForgetTool(agentStore),
             ) + device.tools(),
         )
@@ -196,6 +309,7 @@ class Session(context: Context, private val scope: CoroutineScope) {
             }.onSuccess { reply ->
                 withContext(Dispatchers.Main) {
                     streaming = null
+                    reloadMemories()
                     if (reply.isNotBlank()) {
                         val assistant = Turn("assistant", reply)
                         turns += assistant
@@ -207,6 +321,7 @@ class Session(context: Context, private val scope: CoroutineScope) {
                 }
             }.onFailure { failure ->
                 withContext(NonCancellable + Dispatchers.Main) {
+                    reloadMemories()
                     val partial = sink.toString().trim()
                     streaming = null
                     if (failure is CancellationException) {
