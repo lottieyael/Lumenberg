@@ -13,6 +13,8 @@ data class Memory(
     val pinned: Boolean,
     val createdAt: Long,
     val updatedAt: Long,
+    val sourcePrompt: String = "",
+    val editedByUser: Boolean = false,
 )
 
 class AgentStore(private val root: File) {
@@ -63,7 +65,7 @@ class AgentStore(private val root: File) {
     }
 
     @Synchronized
-    fun remember(text: String, pinned: Boolean = false): Memory {
+    fun remember(text: String, pinned: Boolean = false, sourcePrompt: String = ""): Memory {
         val clean = text.trim()
         require(clean.isNotEmpty()) { "Memory text is empty." }
         val now = System.currentTimeMillis()
@@ -74,13 +76,25 @@ class AgentStore(private val root: File) {
                 text = clean,
                 pinned = memories[existing].pinned || pinned,
                 updatedAt = now,
+                sourcePrompt = sourcePrompt.ifBlank { memories[existing].sourcePrompt },
             ).also { memories[existing] = it }
         } else {
-            Memory(UUID.randomUUID().toString(), clean, pinned, now, now).also(memories::add)
+            Memory(UUID.randomUUID().toString(), clean, pinned, now, now, sourcePrompt).also(memories::add)
         }
         writeMemories(memories)
         return memory
     }
+
+    @Synchronized
+    fun edit(id: String, text: String) {
+        require(text.isNotBlank()) { "Memory text is empty." }
+        writeMemories(readMemories().map {
+            if (it.id == id) it.copy(text = text.trim(), updatedAt = System.currentTimeMillis(), editedByUser = true) else it
+        })
+    }
+
+    @Synchronized
+    fun delete(id: String) = writeMemories(readMemories().filterNot { it.id == id })
 
     @Synchronized
     fun forget(query: String): Int {
@@ -105,6 +119,8 @@ class AgentStore(private val root: File) {
                 pinned = json.optBoolean("pinned", false),
                 createdAt = json.optLong("createdAt", 0L),
                 updatedAt = json.optLong("updatedAt", 0L),
+                sourcePrompt = json.optString("sourcePrompt"),
+                editedByUser = json.optBoolean("editedByUser", false),
             )
         }.getOrNull()
     }
@@ -121,6 +137,8 @@ class AgentStore(private val root: File) {
                         .put("pinned", memory.pinned)
                         .put("createdAt", memory.createdAt)
                         .put("updatedAt", memory.updatedAt)
+                        .put("sourcePrompt", memory.sourcePrompt)
+                        .put("editedByUser", memory.editedByUser)
                         .toString(),
                 )
                 writer.newLine()

@@ -6,7 +6,7 @@ import dev.lumenberg.agent.ToolSpec
 import org.json.JSONArray
 import org.json.JSONObject
 
-class RememberTool(private val store: AgentStore) : Tool {
+class RememberTool(private val store: AgentStore, private val sourcePrompt: String = "") : Tool {
     override val spec = ToolSpec(
         name = "remember",
         description = "Store a durable fact or preference about the user when they ask you to remember it.",
@@ -22,7 +22,7 @@ class RememberTool(private val store: AgentStore) : Tool {
     override suspend fun execute(arguments: JSONObject): String {
         val text = arguments.optString("text").trim()
         require(text.isNotEmpty()) { "Memory text is required." }
-        store.remember(text)
+        store.remember(text, sourcePrompt = sourcePrompt)
         return "Remembered."
     }
 }

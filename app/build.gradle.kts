@@ -11,8 +11,8 @@ android {
         applicationId = "dev.lumenberg"
         minSdk = 28
         targetSdk = 37
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0"
 
         // The free Whisper AAR currently ships arm64-v8a only. Keep this explicit so an
         // x86 emulator fails at install time instead of crashing when voice is first used.

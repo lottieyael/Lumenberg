@@ -14,7 +14,7 @@ import java.util.zip.ZipOutputStream
 object AgentBackup {
     const val VERSION = 1
     private const val MANIFEST = "manifest.json"
-    private val FILES = listOf("profile.json", "memories.jsonl", "conversation.jsonl", "avatar")
+    private val FILES = listOf("profile.json", "memories.jsonl", "conversation.jsonl", "avatar", "cards.json")
 
     fun export(root: File, output: OutputStream) {
         ZipOutputStream(output.buffered()).use { zip ->

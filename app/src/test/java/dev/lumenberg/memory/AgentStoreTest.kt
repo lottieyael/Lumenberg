@@ -8,6 +8,23 @@ import java.nio.file.Files
 
 class AgentStoreTest {
     @Test
+    fun `editing and deleting use identity and preserve provenance`() {
+        val root = Files.createTempDirectory("memory-edit").toFile()
+        try {
+            val store = AgentStore(root)
+            val first = store.remember("Likes tea", sourcePrompt = "Remember that I like tea")
+            val second = store.remember("Likes tea in the morning")
+            store.edit(first.id, "Prefers coffee")
+            val edited = AgentStore(root).loadMemories().first { it.id == first.id }
+            assertEquals("Remember that I like tea", edited.sourcePrompt)
+            assertEquals("Prefers coffee", edited.text)
+            assertTrue(edited.editedByUser)
+            store.delete(first.id)
+            assertEquals(second.id, store.loadMemories().single().id)
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test
     fun `conversation survives a new store instance`() {
         val root = Files.createTempDirectory("lumenberg-agent").toFile()
         try {
